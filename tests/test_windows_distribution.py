@@ -13,7 +13,7 @@ def test_build_script_safe_for_windows_powershell_codepages():
 
 
 def test_workflow_runs_pwsh_and_parses_before_installing_dependencies():
-    workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
     assert "shell: pwsh" in workflow
     assert "Language.Parser]::ParseFile" in workflow
     assert workflow.index("ParseFile") < workflow.index("Install Inno Setup")
@@ -25,8 +25,8 @@ def test_inno_setup_script_has_explicit_utf8_bom():
 
 
 def test_separate_artifacts_and_gpu_build():
-    workflow=(ROOT / '.github/workflows/build-windows.yml').read_text()
-    script=(ROOT / 'windows/build-windows.ps1').read_text()
+    workflow=(ROOT / '.github/workflows/build-windows.yml').read_text(encoding="utf-8")
+    script=(ROOT / 'windows/build-windows.ps1').read_text(encoding="utf-8")
     assert 'GigaScribe-Windows-Installer' in workflow
     assert 'GigaScribe-Windows-Portable' in workflow
     assert 'frontend' in workflow and 'npm run build' in workflow
@@ -35,9 +35,9 @@ def test_separate_artifacts_and_gpu_build():
 
 
 def test_frontend_native_export_and_mantine_sources():
-    source=(ROOT/'frontend/src/App.tsx').read_text()
-    pkg=(ROOT/'frontend/package.json').read_text()
-    desktop=(ROOT/'desktop.py').read_text()
+    source=(ROOT/'frontend/src/App.tsx').read_text(encoding="utf-8")
+    pkg=(ROOT/'frontend/package.json').read_text(encoding="utf-8")
+    desktop=(ROOT/'desktop.py').read_text(encoding="utf-8")
     assert '@mantine/core' in pkg
     assert 'pywebview.api.save_text' in source
     assert 'webview.SAVE_DIALOG' in desktop

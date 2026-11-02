@@ -293,7 +293,7 @@ def test_desktop_self_check_without_models(monkeypatch, tmp_path):
 
     frontend = tmp_path / 'frontend-dist'
     (frontend / 'assets').mkdir(parents=True)
-    (frontend / 'index.html').write_text('<div>GigaScribe</div>')
+    (frontend / 'index.html').write_text('<div>GigaScribe</div>', encoding='utf-8')
     monkeypatch.setattr(backend_main, 'DIST', frontend)
     monkeypatch.setattr(torch.version, 'cuda', '12.8')
     monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda: None))
@@ -301,8 +301,8 @@ def test_desktop_self_check_without_models(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, 'pyannote.audio', types.ModuleType('pyannote.audio'))
     monkeypatch.setitem(sys.modules, 'torchcodec', types.ModuleType('torchcodec'))
     monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
-    assert self_check() == 0, (tmp_path / 'gigascribe-desktop-self-check.log').read_text()
-    assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text()
+    assert self_check() == 0, (tmp_path / 'gigascribe-desktop-self-check.log').read_text(encoding='utf-8')
+    assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text(encoding='utf-8')
 
 
 def test_select_device_and_missing_cuda(monkeypatch):

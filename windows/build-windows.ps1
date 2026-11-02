@@ -1,5 +1,7 @@
 # ASCII-only PowerShell script: compatible with Windows PowerShell and pwsh.
 $ErrorActionPreference = 'Stop'
+# Use UTF-8 for Python text I/O regardless of the Windows console ANSI code page.
+$env:PYTHONUTF8 = '1'
 Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'Windows only' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
