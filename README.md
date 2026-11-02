@@ -1,4 +1,4 @@
-# GigaScribe 1.2 — офлайн-расшифровка аудио на GigaAM
+# GigaScribe 1.2.1 — офлайн-расшифровка аудио на GigaAM
 
 Десктопный интерфейс с локальным движком Сбера GigaAM. Обычный пользователь Windows **не устанавливает Python, Node.js или FFmpeg и не пользуется терминалом**: после Windows-сборки он запускает `GigaScribe-Setup-Windows-x64.exe` и открывает программу через меню «Пуск».
 
@@ -34,21 +34,35 @@
 
 ### Альтернативно: собрать на собственном Windows-компьютере
 
-Для **разработчика**, не для конечного пользователя: установите Python 3.11, Git, Inno Setup 6 и запустите `windows/build-windows.ps1` в PowerShell. Он собирает PyInstaller `onedir`, установщик Inno Setup и переносной ZIP. На macOS или Linux этот сценарий Windows EXE не соберёт.
+Для **разработчика**, не для конечного пользователя: установите Python 3.11 (доступный как `python` в PATH), Git, Inno Setup 6 и запустите `windows/build-windows.ps1` в PowerShell. Скрипт намеренно содержит только ASCII, а GitHub Actions запускает его через PowerShell 7 (`pwsh`), чтобы избежать ошибки с кодировкой Windows PowerShell 5.1. Он собирает PyInstaller `onedir`, установщик Inno Setup и переносной ZIP. На macOS или Linux этот сценарий Windows EXE не соберёт.
 
-## Локальная разработка / запуск сервера
+## Локальный запуск на Windows (без сборки EXE)
 
-Рекомендуется Python 3.11. При работе без установщика:
+Нужны **Python 3.11** и **Git**. Откройте PowerShell в корне распакованного проекта (папка, где лежит `desktop.py`). Выполните по очереди:
 
 ```powershell
 py -3.11 -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt "gigaam[torch] @ git+https://github.com/salute-developers/GigaAM.git"
-.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt "gigaam[torch] @ git+https://github.com/salute-developers/GigaAM.git"
+.\.venv\Scripts\python.exe desktop.py
 ```
 
-Откройте `http://127.0.0.1:8000`. Это служебный вариант для разработчиков. В Windows-установщике сервер запускается **автоматически внутри приложения** на случайном локальном порту и не появляется консоль. Мутирующие запросы защищаются одноразовым токеном, выдаваемым окну программы.
+Последняя команда открывает **самостоятельное окно GigaScribe**, без браузера; локальный сервер стартует автоматически. После первой установки можно запускать программу двойным кликом по `start-desktop.bat` или повторять последнюю команду. Node.js для этого не нужен. FFmpeg устанавливается Python-зависимостью `imageio-ffmpeg`, отдельная системная установка обычно не требуется. В режиме разработки модели хранятся в `./models` рядом с исходниками; они скачиваются только после нажатия кнопки в приложении.
 
-В проекте также остаётся необязательный React + TypeScript UI. `frontend/dist/` — **независимый готовый интерфейс**, который используется Windows-приложением; `frontend/src/` — отдельная React-версия. `npm run build` собирает последнюю в `frontend/react-dist/` и **не перезаписывает** десктопный HTML.
+Если окно не открылось, запустите именно команду `desktop.py` из PowerShell, чтобы увидеть текст ошибки. Для диагностики интерфейса без нативного окна можно запустить HTTP-сервер:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+После этого откройте `http://127.0.0.1:8000`. Он **не требуется** при запуске `desktop.py`.
+
+### Исправление предыдущей ошибки GitHub Actions
+
+Ошибка `Unexpected token 'Ð...'` возникала из-за кириллицы в UTF-8 без BOM, прочитанной Windows PowerShell 5.1 как ANSI. В версии 1.2.1 `windows/build-windows.ps1` ASCII-only, workflow использует `pwsh`, а проверка синтаксиса выполняется **до** установки зависимостей. Чтобы исправить существующий репозиторий, замените в нём **как минимум** два файла — `windows/build-windows.ps1` и `.github/workflows/build-windows.yml` — версиями из этого архива и сделайте commit. Затем снова запустите workflow в GitHub Actions. Для учёта новой версии установщика также обновите `windows/GigaScribe.iss`.
+
+Если сборка после этого упадёт на **другом** шаге (установка GigaAM/PyTorch, PyInstaller или Inno Setup), это отдельная проблема: Windows-сборка и настоящий инференс с весами в этой среде пока не проверены.
 
 ## Файлы
 
@@ -62,6 +76,7 @@ frontend/src/                    альтернативный React + TypeScript
 GigaScribe.spec                  настройки PyInstaller
 windows/GigaScribe.iss           установщик Inno Setup
 windows/build-windows.ps1        сборка для разработчика
+start-desktop.bat                запуск окна после локальной установки зависимостей
 .github/workflows/build-windows.yml автоматическая сборка в GitHub Actions
 requirements-desktop.txt         UI+FFmpeg+Python зависимости
 ```

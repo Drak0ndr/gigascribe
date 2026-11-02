@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -16,11 +17,21 @@ jobs:
         with:
           python-version: '3.11'
           architecture: x64
+      - name: Check PowerShell script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'windows/build-windows.ps1').Path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
       - name: Install Inno Setup
-        shell: powershell
+        shell: pwsh
         run: choco install innosetup --yes --no-progress
       - name: Build EXE + setup + portable ZIP
-        shell: powershell
+        shell: pwsh
         run: .\windows\build-windows.ps1
       - name: Upload setup and portable distribution
         uses: actions/upload-artifact@v4
