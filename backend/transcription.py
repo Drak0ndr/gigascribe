@@ -6,6 +6,7 @@ import gc
 import shutil
 import threading
 import wave
+from types import MethodType
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired, run
 from typing import Callable
@@ -22,6 +23,35 @@ MAX_SEGMENT_SECONDS = 23.0  # GigaAM .transcribe() supports <= 25 seconds.
 _model_lock = threading.Lock()
 _current_model_name: str | None = None
 _current_model = None
+
+
+def _prepare_normalized_wav(self, wav_file: str):
+    """Feed already-converted 16-kHz mono PCM directly into GigaAM.
+
+    GigaAM's stock prepare_wav/load_audio calls an external executable named
+    `ffmpeg` even for normalized WAV files. On Windows our bundled imageio-ffmpeg
+    has a versioned filename and is deliberately not installed on PATH.
+    Reading the PCM frames in-process avoids that redundant, fragile subprocess.
+    """
+    import torch
+
+    with wave.open(str(wav_file), "rb") as wav:
+        if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, SAMPLE_RATE):
+            raise ValueError("Неверный формат сегмента: ожидается 16 kHz, mono, PCM16")
+        raw = wav.readframes(wav.getnframes())
+
+    # Copy before torch.from_numpy to give PyTorch a writable, owned buffer.
+    # Values and scaling match GigaAM's own load_audio() implementation.
+    pcm = np.frombuffer(raw, dtype="<i2").copy()
+    audio = torch.from_numpy(pcm).float().div_(32768.0)
+    audio = audio.to(self._device).to(self._dtype).unsqueeze(0)
+    lengths = torch.full((1,), audio.shape[-1], device=self._device, dtype=torch.long)
+    return audio, lengths
+
+
+def _use_normalized_wav_loader(model) -> None:
+    """Override only per-instance audio preparation, not GigaAM inference."""
+    model.prepare_wav = MethodType(_prepare_normalized_wav, model)
 
 
 def load_model(choice: str):
@@ -53,6 +83,7 @@ def load_model(choice: str):
         if not installed(choice):
             raise RuntimeError("Сначала скачайте выбранную модель во вкладке «Модель распознавания»")
         model = gigaam.load_model(name, download_root=str(folder(choice)))
+        _use_normalized_wav_loader(model)
         _current_model = model
         _current_model_name = name
         return model

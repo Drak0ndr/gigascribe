@@ -43,6 +43,15 @@ if (-not (Test-Path $builtExe)) {
     throw 'PyInstaller did not produce GigaScribe.exe.'
 }
 
+# Make a smoke test against the FROZEN EXE rather than the source Python only.
+# Fails the workflow if bundled imports/FFmpeg/PCM loader are broken.
+& $builtExe --self-check
+if ($LASTEXITCODE -ne 0) {
+    $smokeLog = Join-Path $env:TEMP 'gigascribe-desktop-self-check.log'
+    if (Test-Path $smokeLog) { Get-Content $smokeLog }
+    throw 'Frozen EXE self-check failed. See log above.'
+}
+
 $portable = Join-Path $projectRoot 'portable\GigaScribe'
 if (Test-Path $portable) { Remove-Item $portable -Recurse -Force }
 New-Item -ItemType Directory -Path $portable -Force | Out-Null

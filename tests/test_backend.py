@@ -194,3 +194,100 @@ def test_desktop_launcher_local_window(monkeypatch):
     assert '127.0.0.1' in observed['url']
     assert app.state.desktop_token
     app.state.desktop_token = None
+
+
+def test_normalized_pcm_loader_avoids_external_ffmpeg(tmp_path):
+    """Regression for WinError 2 from GigaAM's second, unbundled ffmpeg call."""
+    import torch
+    from backend.transcription import _use_normalized_wav_loader
+
+    wav_path = tmp_path / 'segment.wav'
+    samples = np.array([-32768, -16384, 0, 16384, 32767], dtype='<i2')
+    with wave.open(str(wav_path), 'wb') as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(samples.tobytes())
+
+    class FakeGigaAM:
+        _device = torch.device('cpu')
+        _dtype = torch.float32
+        def prepare_wav(self, path):
+            raise FileNotFoundError(2, 'No such file or directory', 'ffmpeg')
+        def transcribe(self, path):
+            audio, lengths = self.prepare_wav(path)
+            assert lengths.item() == 5
+            assert audio.shape == (1, 5)
+            assert audio.dtype == torch.float32
+            assert audio.device.type == 'cpu'
+            assert torch.allclose(audio.squeeze(), torch.from_numpy(samples.astype(np.float32)) / 32768)
+            return 'Распознано'
+
+    model = FakeGigaAM()
+    _use_normalized_wav_loader(model)
+    assert model.transcribe(str(wav_path)) == 'Распознано'
+
+
+def test_normalized_pcm_loader_rejects_wrong_format(tmp_path):
+    import torch
+    from backend.transcription import _use_normalized_wav_loader
+
+    wav_path = tmp_path / 'bad.wav'
+    with wave.open(str(wav_path), 'wb') as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(b'\x00' * 100)
+
+    class FakeGigaAM:
+        _device = torch.device('cpu')
+        _dtype = torch.float32
+    model = FakeGigaAM()
+    _use_normalized_wav_loader(model)
+    import pytest
+    with pytest.raises(ValueError, match='Неверный формат'):
+        model.prepare_wav(str(wav_path))
+
+
+def test_load_model_installs_pcm_adapter(monkeypatch, tmp_path):
+    """The actual model path must wire up the non-FFmpeg decoder."""
+    import sys
+    import types
+    import torch
+    from backend import transcription, model_store
+
+    class FakeModel:
+        _device = torch.device('cpu')
+        _dtype = torch.float32
+        def prepare_wav(self, path):
+            raise FileNotFoundError(2, 'No such file or directory', 'ffmpeg')
+
+    fake = FakeModel()
+    monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda *a, **kw: fake))
+    monkeypatch.setattr(model_store, 'installed', lambda choice: True)
+    monkeypatch.setattr(transcription, '_current_model', None)
+    monkeypatch.setattr(transcription, '_current_model_name', None)
+    wav_path = tmp_path / 'test.wav'
+    with wave.open(str(wav_path), 'wb') as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(SAMPLE_RATE)
+        wav.writeframes(b'\x00\x00' * SAMPLE_RATE)
+    model = transcription.load_model('russian')
+    assert model is fake
+    audio, lengths = model.prepare_wav(str(wav_path))
+    assert audio.shape == (1, SAMPLE_RATE)
+    assert lengths.item() == SAMPLE_RATE
+
+
+def test_desktop_self_check_without_models(monkeypatch, tmp_path):
+    """The frozen EXE smoke check should require no downloaded checkpoints."""
+    import sys
+    import types
+    import tempfile
+    from desktop import self_check
+
+    monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda: None))
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+    assert self_check() == 0
+    assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text()

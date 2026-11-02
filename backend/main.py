@@ -26,7 +26,7 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.2.1")
+app = FastAPI(title="GigaScribe", version="1.2.2")
 app.state.desktop_token = None
 
 
