@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1020">
+<meta name="description" content="GigaScribe — локальная расшифровка аудио на GigaAM от Сбера">
+<title>GigaScribe — аудио в текст</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .icon{height:18px;width:18px;flex-shrink:0;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;fill:none}
+  .logo-icon .icon{height:24px;width:24px}
+  .drop-icon .icon{height:29px;width:29px}
+  .file-symbol .icon{height:25px;width:25px}
+  .step-number{user-select:none}
+  .hidden{display:none!important}
+  .result-box{position:relative}
+  .model-card[aria-pressed=true]{background:#1a2140;border-color:#786ef5;box-shadow:inset 0 0 0 1px #786ef526}
+  .model-card[aria-pressed=true] .radio-mark{border-color:#8075f8;background:#8075f8}
+  .model-card[aria-pressed=false] .radio-mark .icon{display:none}
+  button:focus-visible,.drop-zone:focus-visible{outline:2px solid #aaa3ff;outline-offset:3px}
+  .transcript-input{min-height:250px}
+  .result-meta span{display:inline-flex;align-items:center;gap:6px}
+  .model-card{cursor:pointer}
+  .model-card .icon{width:20px;height:20px}
+  #status-error{background:#3f2335;color:#ffbfca;border:1px solid #83495f;border-radius:9px;padding:10px 14px;font-size:11px;line-height:1.7;margin-top:14px;overflow-wrap:anywhere}
+  #retry{margin-top:10px}
+  #file-card:not(.hidden){display:block}
+  .result-box.has-result{display:block}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+ <div class="logo"><span class="logo-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M2 10v4M6 7v10M10 4v16M14 8v8M18 5v14M22 10v4"/></svg></span><span>giga<span class="logo-accent">scribe</span><small>STUDIO</small></span></div>
+ <div class="side-nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+ <div class="side-item active"><svg class="icon" viewBox="0 0 24 24"><path d="M2 10v4M6 5v14M10 9v6M14 3v18M18 7v10M22 11v2"/></svg> Расшифровка <span class="side-marker"></span></div>
+ <div class="side-spacer"></div>
+ <div class="sidebar-bottom"><div class="sidebar-note"><svg class="icon green" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg><div><strong>Приватность прежде всего</strong><p>Аудио обрабатывается на вашем компьютере и не отправляется в облако.</p></div></div><a class="powered" href="https://github.com/salute-developers/GigaAM" target="_blank" rel="noopener noreferrer">Основано на GigaAM <span>↗</span></a></div>
+</aside>
+<div class="main-shell">
+<header class="topbar"><div class="breadcrumb">Инструменты <span>/</span><strong>Расшифровка аудио</strong></div><div id="server-indicator" class="server-indicator"><i class="live-dot"></i><span id="server-status">Подключение...</span></div></header>
+<main class="content">
+<div class="hero">
+ <div class="hero-eyebrow">✦ РАСПОЗНАВАНИЕ РЕЧИ НА БАЗЕ ИИ</div>
+ <h1>Превратите звук<br><span>в понятный текст.</span></h1>
+ <p>Загрузите аудиозапись, выберите модель Сбера и получите расшифровку. Всё локально, без API-ключей и отправки файлов в облако.</p>
+ <div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div id="hero-wave" class="hero-wave"></div></div>
+</div>
+<div class="workspace-grid">
+<section class="left-column">
+ <div class="section-title"><span class="step-number">01</span><div><h2>Аудиофайл</h2><p>Начните с загрузки записи</p></div></div>
+ <input id="file-input" type="file" class="visually-hidden" accept=".mp3,.wav,.m4a,.mp4,.flac,.ogg,.opus,.webm,.aac,.wma,.mov,.mkv">
+ <div id="drop-zone" class="drop-zone" role="button" tabindex="0">
+ <div class="drop-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M12 16V3m0 0-4 4m4-4 4 4"/><path d="M20 16.5a4.5 4.5 0 0 0-2-8.5h-1A7 7 0 0 0 4 11a4.5 4.5 0 0 0 0 9h15"/></svg></div>
+ <h3>Перетащите аудиофайл сюда</h3><p>или нажмите, чтобы выбрать на компьютере</p>
+ <button id="pick-file" class="btn choose-btn"><svg class="icon" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v1"/><path d="M3 9h18l-3 11H6Z"/></svg> Выбрать файл</button>
+ <div class="format-hint">MP3, WAV, M4A, FLAC, OGG, WebM, MP4 · до 200 МБ</div>
+ </div>
+ <div id="file-card" class="file-card hidden"><div class="file-card-top"><span class="file-symbol"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 15v3M11 12v8M14 14v4M17 15v3"/></svg></span><div class="file-identity"><strong id="file-name"></strong><span id="file-size"></span></div><button id="remove-file" class="icon-button" aria-label="Убрать файл">✕</button></div>
+ <audio id="audio-player" preload="metadata"></audio>
+ <div class="audio-controls"><button id="play-button" class="play-button" aria-label="Воспроизвести">▶</button><span id="position" class="timer">00:00</span><input id="seek" class="seek" aria-label="Позиция аудио" type="range" min="0" max="1" value="0" step="0.05"><span id="duration" class="timer">00:00</span></div>
+ <span class="file-success">✓ Файл выбран и готов к обработке</span></div>
+ <div class="section-title model-title"><span class="step-number">02</span><div><h2>Модель распознавания</h2><p>Выберите подходящий язык записи</p></div></div>
+ <div class="models">
+ <button class="model-card selected" id="model-russian" data-model="russian" aria-pressed="true"><span class="model-icon ru"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></span><span class="model-details"><span class="model-name">Русскоязычная <span class="mini-tag">РЕКОМЕНДУЕМ</span></span><span class="model-desc">GigaAM v3 · e2e RNN-T</span><span class="model-extra">Русский язык · знаки препинания</span></span><span class="radio-mark"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span></button>
+ <button class="model-card" id="model-multilingual" data-model="multilingual" aria-pressed="false"><span class="model-icon ml"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></span><span class="model-details"><span class="model-name">Мультиязычная</span><span class="model-desc">GigaAM Multilingual · CTC</span><span class="model-extra">RU · EN · KK · KY · UZ</span></span><span class="radio-mark"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span></button>
+ </div>
+ <div class="manager-panel">
+   <div class="manager-heading"><div><strong>Установленные модели</strong><small>Загружаются только по вашему выбору</small></div><span class="manager-spark">✦</span></div>
+   <div id="manager-russian" class="manager-row">
+     <span class="manager-dot" id="dot-russian"></span>
+     <div class="manager-identity"><strong>Русскоязычная</strong><small id="status-russian">Проверка...</small><div class="manager-progress hidden" id="progress-russian"><span id="bar-russian"></span></div></div>
+     <button type="button" class="manager-action" id="action-russian" disabled>...</button>
+   </div>
+   <div id="manager-multilingual" class="manager-row">
+     <span class="manager-dot" id="dot-multilingual"></span>
+     <div class="manager-identity"><strong>Мультиязычная</strong><small id="status-multilingual">Проверка...</small><div class="manager-progress hidden" id="progress-multilingual"><span id="bar-multilingual"></span></div></div>
+     <button type="button" class="manager-action" id="action-multilingual" disabled>...</button>
+   </div>
+   <div class="manager-footer"><span>Папка моделей</span><button id="copy-path" title="Копировать путь к моделям" type="button">▢ Копировать путь</button></div>
+   <div class="manager-path" id="models-path">Проверка расположения...</div>
+   <div id="models-error" role="alert" class="models-error hidden"></div>
+ </div>
+ <div class="model-hint"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></svg><span id="model-hint-text">Лучший выбор для русской речи. Модель умеет расставлять пунктуацию и приводить текст к читаемому виду.</span></div>
+ <button id="start" class="btn primary-btn" disabled>♫ &nbsp; Расшифровать аудио &nbsp; →</button>
+ <div id="status-error" class="hidden" role="alert"></div>
+</section>
+<section class="right-column">
+ <div class="section-title right-head"><span class="step-number">03</span><div><h2>Результат</h2><p>Ваша готовая расшифровка</p></div><span id="done-tag" class="done-tag hidden">✓ Готово</span></div>
+ <div id="result-box" class="result-box">
+ <div id="empty-state" class="empty-state"><div class="empty-illustration"><div class="empty-aura"></div><svg class="icon" style="width:42px;height:42px;z-index:1" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg><span class="tiny-star">✦</span></div><h3>Здесь появится текст</h3><p>Загрузите запись, выберите модель и нажмите «Расшифровать аудио»</p><div class="empty-line"></div><div class="empty-line short"></div><div class="empty-line medium"></div></div>
+ <div id="progress-state" class="progress-state hidden"><div class="working-icon"><svg class="icon" style="width:30px;height:30px" viewBox="0 0 24 24"><path d="M2 10v4M6 6v12M10 4v16M14 8v8M18 5v14M22 10v4"/></svg></div><h3>Обрабатываем вашу запись</h3><p id="phase-detail">Загрузка...</p><div class="progress-meta"><span>Прогресс</span><strong id="progress-label">0%</strong></div><div class="progress-track"><div id="progress-fill" class="progress-fill" style="width:0%"></div></div><p class="progress-note">Расшифровка выполняется локально. Длинные записи могут обрабатываться несколько минут.</p></div>
+ <div id="failed-state" class="failed-state hidden"><svg class="icon" style="width:37px;height:37px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 7v6m0 4h.01"/></svg><h3>Не получилось распознать</h3><p id="fail-message">Проверьте файл и попробуйте ещё раз</p><button type="button" id="retry" class="btn retry-btn">↻ Повторить</button></div>
+ <div id="transcript-content" class="transcript-content hidden"><div class="result-meta"><span>◷ <span id="result-duration">00:00</span></span><span class="meta-divider"></span><span id="result-model">GigaAM v3</span><span id="result-count" class="result-count">0 слов</span></div><textarea id="transcript-input" class="transcript-input" spellcheck="false" aria-label="Расшифровка, можно редактировать"></textarea><div class="edit-tip">Вы можете отредактировать текст перед сохранением</div></div>
+ </div>
+ <div class="result-actions"><button id="copy" disabled class="btn action-btn">▢ Копировать</button><button id="download-txt" disabled class="btn action-btn">↓ Скачать TXT</button><button id="download-srt" disabled class="btn action-btn">▤ Скачать SRT</button></div>
+ <div class="privacy-footer"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg><span>Без облака и подписок. Веса моделей скачиваются отдельно только по вашему выбору.</span></div>
+</section>
+</div>
+<footer class="footer"><span>GigaScribe · локальная расшифровка речи</span><span>На открытых моделях <a href="https://github.com/salute-developers/GigaAM" target="_blank" rel="noopener noreferrer">GigaAM</a></span></footer>
+</main>
+</div>
+</div>
+<script src="app.js" defer></script>
+</body>
+</html>
