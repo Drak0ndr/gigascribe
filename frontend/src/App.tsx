@@ -6,7 +6,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import {
-  IconAudioLines, IconCheck, IconCopy, IconDownload, IconFolder, IconInfoCircle,
+  IconCheck, IconCopy, IconDownload, IconFolder, IconInfoCircle,
   IconMicrophone, IconMinus, IconPlayerPlay, IconRefresh, IconSettings, IconSquare,
   IconTrash, IconUpload, IconX, IconCpu, IconCloudDownload,
 } from '@tabler/icons-react' 
@@ -27,7 +27,7 @@ declare global {
   }
 }
 const token = new URLSearchParams(location.search).get('token')
-const auth = () => token ? {'X-GigaScribe-Token':token} : {}
+const auth = (): Record<string, string> => token ? {'X-GigaScribe-Token': token} : {}
 const fmtSize = (n:number) => n > 1e9 ? `${(n/1024**3).toFixed(2)} ГБ` : `${(n/1024**2).toFixed(0)} МБ`
 const fmtTime = (n:number) => `${Math.floor(n/3600)?`${Math.floor(n/3600)}:`:''}${Math.floor(n%3600/60).toString().padStart(2,'0')}:${Math.floor(n%60).toString().padStart(2,'0')}`
 const srtTime = (n:number) => {const ms=Math.round(n*1000);return `${Math.floor(ms/3600000).toString().padStart(2,'0')}:${Math.floor(ms%3600000/60000).toString().padStart(2,'0')}:${Math.floor(ms%60000/1000).toString().padStart(2,'0')},${(ms%1000).toString().padStart(3,'0')}`}
@@ -154,7 +154,7 @@ function App() {
 
   return <div className="app-root">
     {isDesktop&&<div className="windowbar">
-      <div className="windowbrand pywebview-drag-region"><IconAudioLines size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3</span></div>
+      <div className="windowbrand pywebview-drag-region"><IconMicrophone size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3.1</span></div>
       <div className="windowactions">
         <button aria-label="Свернуть" onClick={()=>void window.pywebview?.api?.minimize()}><IconMinus size={16}/></button>
         <button aria-label="Развернуть" onClick={()=>void window.pywebview?.api?.toggle_maximize()}><IconSquare size={13}/></button>
@@ -163,7 +163,7 @@ function App() {
     </div>}
     <div className="app-layout">
       <aside className="sidebar">
-        <div className="sidebar-heading"><div className="app-mark"><IconAudioLines size={21}/></div><div><Text fw={700} size="sm">GigaScribe</Text><Text c="dimmed" size="xs">Локальная транскрибация</Text></div></div>
+        <div className="sidebar-heading"><div className="app-mark"><IconMicrophone size={21}/></div><div><Text fw={700} size="sm">GigaScribe</Text><Text c="dimmed" size="xs">Локальная транскрибация</Text></div></div>
         <Text size="xs" c="dimmed" tt="uppercase" fw={600} mt={26} mb={8} ml={13}>Рабочее пространство</Text>
         <nav className="nav">
           {nav.map(n=><button key={n.key} className={page===n.key?'active':''} onClick={()=>setPage(n.key)}><n.icon size={19} stroke={1.7}/>{n.label}</button>)}
@@ -183,7 +183,7 @@ function App() {
                 <IconUpload size={28} stroke={1.45} color="var(--mantine-color-dimmed)"/>
                 <Text fw={600} size="sm" mt="sm">{file?file.name:'Перетащите аудиофайл сюда'}</Text>
                 <Text size="xs" c="dimmed" mt={4}>{file?`${fmtSize(file.size)} · готов к обработке`:'MP3, M4A, WAV, FLAC, OGG и другие'}</Text>
-                <FileButton onChange={pickFile} accept={formats} disabled={busy}><Button size="xs" variant="default" mt="lg" leftSection={<IconFolder size={15}/>}>{file?'Заменить файл':'Выбрать файл'}</Button></FileButton>
+                <FileButton onChange={pickFile} accept={formats} disabled={busy}>{(props) => <Button {...props} size="xs" variant="default" mt="lg" leftSection={<IconFolder size={15}/>}>{file?'Заменить файл':'Выбрать файл'}</Button>}</FileButton>
               </div>
               {url&&<audio className="audio-player" src={url} controls preload="metadata"/>}
             </Card>
@@ -213,7 +213,7 @@ function App() {
           {(['russian','multilingual'] as const).map(choice=>{
             const m=models?.models[choice]
             return <Card key={choice} className="panel" padding="lg" withBorder radius="lg">
-              <Group justify="space-between" align="flex-start" wrap="nowrap"><Group align="flex-start" gap="md" wrap="nowrap"><div className="model-icon">{choice==='russian'?<IconMicrophone size={22}/>:<IconAudioLines size={22}/>}</div><div><Text fw={600}>{choice==='russian'?'GigaAM v3 Russian':'GigaAM Multilingual'}</Text><Text c="dimmed" size="sm" mt={3}>{choice==='russian'?'Русская речь, пунктуация и регистр':'RU · EN · KK · KY · UZ'}</Text><Group gap="xs" mt="sm"><Badge variant="light" color={m?.installed?'green':m?.status==='failed'?'red':'gray'}>{m?.status==='downloading'?'Загружается':m?.installed?'Установлена':m?.status==='failed'?'Ошибка':'Не установлена'}</Badge>{m?.size_bytes? <Text size="xs" c="dimmed">{fmtSize(m.size_bytes)}</Text>:null}</Group></div></Group>
+              <Group justify="space-between" align="flex-start" wrap="nowrap"><Group align="flex-start" gap="md" wrap="nowrap"><div className="model-icon">{choice==='russian'?<IconMicrophone size={22}/>:<IconMicrophone size={22}/>}</div><div><Text fw={600}>{choice==='russian'?'GigaAM v3 Russian':'GigaAM Multilingual'}</Text><Text c="dimmed" size="sm" mt={3}>{choice==='russian'?'Русская речь, пунктуация и регистр':'RU · EN · KK · KY · UZ'}</Text><Group gap="xs" mt="sm"><Badge variant="light" color={m?.installed?'green':m?.status==='failed'?'red':'gray'}>{m?.status==='downloading'?'Загружается':m?.installed?'Установлена':m?.status==='failed'?'Ошибка':'Не установлена'}</Badge>{m?.size_bytes? <Text size="xs" c="dimmed">{fmtSize(m.size_bytes)}</Text>:null}</Group></div></Group>
                 {m?.installed?<Button variant="subtle" color="red" size="sm" leftSection={<IconTrash size={16}/>} disabled={busy} onClick={()=>setPendingDelete(choice)}>Удалить</Button>:<Button variant="default" size="sm" leftSection={<IconCloudDownload size={17}/>} loading={m?.status==='downloading'} disabled={busy} onClick={()=>void manage(choice)}>Скачать</Button>}
               </Group>
               {m?.status==='downloading'&&<><Progress value={m.progress} mt="md" size="sm"/><Text c="dimmed" size="xs" mt={5}>{m.detail}</Text></>}
@@ -233,7 +233,7 @@ function App() {
           <Card className="panel" withBorder radius="lg" padding="lg"><Group gap="sm" mb="lg"><IconCpu size={22}/><Text fw={600}>Ускорение NVIDIA</Text></Group><Stack gap="sm"><Group justify="space-between"><Text size="sm" c="dimmed">CUDA</Text><Badge variant="light" color={deviceInfo?.cuda_available?'green':'red'}>{deviceInfo?.cuda_available?'Доступна':'Недоступна'}</Badge></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Устройство</Text><Text size="sm">{deviceInfo?.gpu_name||'CPU'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Версия PyTorch</Text><Text size="sm">{deviceInfo?.torch_version||'—'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">CUDA runtime</Text><Text size="sm">{deviceInfo?.cuda_runtime||'—'}</Text></Group></Stack>{deviceInfo?.reason&&<Alert mt="lg" color="yellow" icon={<IconInfoCircle size={17}/>}>{deviceInfo.reason}</Alert>}</Card>
           <Card className="panel" withBorder radius="lg" padding="lg"><Text fw={600}>Файлы моделей</Text><Text size="sm" c="dimmed" mt={8} style={{wordBreak:'break-all'}}>{models?.path||'—'}</Text><Text size="xs" c="dimmed" mt="sm">Все веса остаются на диске при обновлении установленной версии приложения.</Text></Card>
         </Stack>}
-        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3 · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
+        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3.1 · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
       </div></ScrollArea></main>
     </div>
     <Modal centered title="Удалить модель?" opened={pendingDelete!==null} onClose={()=>setPendingDelete(null)}>
