@@ -6,6 +6,8 @@ Model checkpoints are NOT included and are only downloaded on user request.
 from __future__ import annotations
 
 import secrets
+import os
+import re
 import socket
 import threading
 import time
@@ -15,9 +17,58 @@ from urllib.request import urlopen
 import uvicorn
 
 
+class WindowAPI:
+    """Small native bridge; never expose arbitrary path writes to web content."""
+    def __init__(self):
+        self.window = None
+        self.is_maximized = False
+
+    def minimize(self):
+        if self.window:
+            self.window.minimize()
+
+    def toggle_maximize(self):
+        if self.window:
+            if self.is_maximized:
+                self.window.restore()
+            else:
+                self.window.maximize()
+            self.is_maximized = not self.is_maximized
+
+    def close(self):
+        if self.window:
+            self.window.destroy()
+
+    def save_text(self, filename: str, body: str) -> bool:
+        import webview
+        if self.window is None:
+            return False
+        name = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ._ -]', '_', filename)[:100]
+        if not name.endswith(('.txt', '.srt')):
+            raise ValueError('Сохранение поддерживает только TXT и SRT')
+        if len(body) > 30_000_000:
+            raise ValueError('Текст слишком большой')
+        selected = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=name,
+            file_types=('Text files (*.txt;*.srt)', 'All files (*.*)'),
+        )
+        if not selected:
+            return False
+        from pathlib import Path
+        destination = selected[0] if isinstance(selected, (list, tuple)) else selected
+        Path(destination).write_text(body, encoding='utf-8-sig')
+        return True
+
+
 def main() -> None:
     import webview
     from backend.main import app
+    from pathlib import Path
+    import sys
+    if getattr(sys, 'frozen', False):
+        tools = Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent)) / 'tools'
+        os.environ['PATH'] = str(tools) + os.pathsep + os.environ.get('PATH', '')
+    webview.settings['ALLOW_DOWNLOADS'] = True
 
     app.state.desktop_token = secrets.token_urlsafe(32)
     # Reserve a port and make uvicorn use the bound listener to avoid races.
@@ -43,9 +94,11 @@ def main() -> None:
             raise RuntimeError('Локальный сервер GigaScribe не запустился')
 
         url = f'http://127.0.0.1:{port}/?token={app.state.desktop_token}'
-        webview.create_window('GigaScribe — расшифровка аудио', url,
-                              width=1280, height=840, min_size=(920, 680),
-                              background_color='#0b1020')
+        bridge = WindowAPI()
+        bridge.window = webview.create_window('GigaScribe', url, js_api=bridge,
+                              width=1280, height=840, min_size=(930, 690),
+                              frameless=True, easy_drag=True, shadow=True,
+                              background_color='#15171c')
         # Windows WebView2 is available by default on modern Windows 10/11.
         webview.start(debug=False)
     finally:
@@ -69,13 +122,19 @@ def self_check() -> int:
     try:
         import torch
         import gigaam
+        import pyannote.audio
+        import torchcodec
+        from backend import vad_store
         from backend.main import DIST
         from backend.transcription import (
             SAMPLE_RATE, ffmpeg_executable, convert_to_wav,
             _use_normalized_wav_loader,
         )
         assert callable(gigaam.load_model), 'GigaAM entry point missing'
+        assert torch.version.cuda, 'CPU-only PyTorch build accidentally bundled'
+        assert callable(vad_store.installed), 'VAD manager import failed'
         assert (DIST / 'index.html').is_file(), 'Bundled frontend is missing'
+        assert (DIST / 'assets').is_dir(), 'Mantine asset files missing'
         assert ffmpeg_executable(), 'Bundled FFmpeg is missing'
 
         class FakeModel:

@@ -8,35 +8,51 @@ on:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           architecture: x64
-      - name: Check PowerShell script syntax
+      - name: Build React + Mantine frontend
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
+          Set-Location frontend
+          npm install --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Mantine frontend build failed' }
+      - name: Check PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'windows/build-windows.ps1').Path, [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.ToString() }
-            exit 1
-          }
+          if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
-      - name: Build EXE + setup + portable ZIP
+      - name: Build Windows installer and portable distribution
         shell: pwsh
         run: .\windows\build-windows.ps1
-      - name: Upload setup and portable distribution
+      - name: Upload installer EXE
         uses: actions/upload-artifact@v4
         with:
-          name: GigaScribe-Windows
-          path: releases/*
+          name: GigaScribe-Windows-Installer
+          path: releases/GigaScribe-Setup-Windows-x64.exe
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: GigaScribe-Windows-Portable
+          path: releases/GigaScribe-Windows-Portable.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

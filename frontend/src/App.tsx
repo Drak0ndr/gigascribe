@@ -1,336 +1,245 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import {
-  AudioLines, ArrowDownToLine, ArrowRight, Check, CheckCheck,
-  CircleAlert, Clipboard, Clock3, CloudUpload, FileAudio2, FileText,
-  FolderOpen, Globe2, Languages, LoaderCircle, Mic2,
-  Pause, Play, RotateCcw, ShieldCheck, Sparkles, Waves, X,
-} from 'lucide-react'
+  Alert, Badge, Button, Card, Divider, FileButton, Group,
+  Modal, NativeSelect, Paper, Progress, ScrollArea, SegmentedControl, SimpleGrid,
+  Stack, Text, Textarea, TextInput, Title,
+} from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import {
+  IconAudioLines, IconCheck, IconCopy, IconDownload, IconFolder, IconInfoCircle,
+  IconMicrophone, IconMinus, IconPlayerPlay, IconRefresh, IconSettings, IconSquare,
+  IconTrash, IconUpload, IconX, IconCpu, IconCloudDownload,
+} from '@tabler/icons-react' 
 
 type ModelChoice = 'russian' | 'multilingual'
-type ModelStatus = {status: 'installed' | 'not_installed' | 'failed' | 'downloading', installed: boolean, size_bytes: number, progress: number, detail: string, error: string | null}
-const desktopToken = new URLSearchParams(window.location.search).get('token')
-const authHeaders = () => desktopToken ? {'X-GigaScribe-Token': desktopToken} : {}
-
-type Segment = { start: number; end: number; text: string }
-type Result = { text: string; segments: Segment[]; duration: number; model: ModelChoice; model_name: string }
-type Job = {
-  id: string; filename: string; model: ModelChoice;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
-  phase: string; progress: number; detail: string; error?: string | null; result?: Result | null;
-}
-const formats = '.mp3,.wav,.m4a,.mp4,.flac,.ogg,.opus,.webm,.aac,.wma,.mov,.mkv'
-const maxBytes = 200 * 1024 * 1024
-const fmtSize = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} ГБ` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} КБ` : `${(bytes / 1024 / 1024).toFixed(1)} МБ`
-const fmtTime = (seconds: number) => {
-  if (!Number.isFinite(seconds)) return '00:00'
-  const s = Math.floor(seconds)
-  return `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`
-}
-const fmtSrt = (s: number) => {
-  const ms = Math.round(s * 1000)
-  const hh = Math.floor(ms / 3600000).toString().padStart(2, '0')
-  const mm = Math.floor(ms % 3600000 / 60000).toString().padStart(2, '0')
-  const ss = Math.floor(ms % 60000 / 1000).toString().padStart(2, '0')
-  const frac = (ms % 1000).toString().padStart(3, '0')
-  return `${hh}:${mm}:${ss},${frac}`
-}
-const saveFile = (text: string, filename: string, mime = 'text/plain;charset=utf-8') => {
-  const blob = new Blob(['\ufeff', text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1500)
-}
-const baseName = (name: string) => name.replace(/\.[^.]+$/, '')
-const readError = async (response: Response) => {
-  try {
-    const data = await response.json()
-    const detail = data.detail
-    return typeof detail === 'string' ? detail : `Ошибка сервера: ${response.status}`
-  } catch {
-    return `Ошибка сервера: ${response.status}`
+type Page = 'transcribe' | 'models' | 'settings'
+type Mode = 'standard' | 'vad'
+type Device = 'auto' | 'cuda' | 'cpu'
+type ModelStatus = {status: 'installed'|'not_installed'|'downloading'|'failed', installed: boolean, size_bytes: number, progress: number, detail: string, error: string|null}
+type ModelInfo = {models: Record<ModelChoice,ModelStatus>, vad: ModelStatus, path: string}
+type Segment = {start: number, end: number, text: string}
+type Result = {text:string,segments:Segment[],duration:number,model:ModelChoice,mode:Mode,device:string}
+type Job = {job_id?:string,id:string,status:'queued'|'processing'|'completed'|'failed',progress:number,detail:string,error?:string|null,result?:Result|null}
+type DeviceInfo = {cuda_available:boolean,gpu_name:string|null,torch_version:string|null,cuda_runtime:string|null,reason:string|null}
+declare global {
+  interface Window {
+    pywebview?: {api?: { minimize:()=>Promise<void>,toggle_maximize:()=>Promise<void>,close:()=>Promise<void>,save_text:(name:string,body:string)=>Promise<boolean> }}
   }
 }
+const token = new URLSearchParams(location.search).get('token')
+const auth = () => token ? {'X-GigaScribe-Token':token} : {}
+const fmtSize = (n:number) => n > 1e9 ? `${(n/1024**3).toFixed(2)} ГБ` : `${(n/1024**2).toFixed(0)} МБ`
+const fmtTime = (n:number) => `${Math.floor(n/3600)?`${Math.floor(n/3600)}:`:''}${Math.floor(n%3600/60).toString().padStart(2,'0')}:${Math.floor(n%60).toString().padStart(2,'0')}`
+const srtTime = (n:number) => {const ms=Math.round(n*1000);return `${Math.floor(ms/3600000).toString().padStart(2,'0')}:${Math.floor(ms%3600000/60000).toString().padStart(2,'0')}:${Math.floor(ms%60000/1000).toString().padStart(2,'0')},${(ms%1000).toString().padStart(3,'0')}`}
+const errMsg = async(r:Response) => {try{const v=await r.json();return typeof v.detail==='string'?v.detail:`HTTP ${r.status}`}catch{return `HTTP ${r.status}`}}
+const baseName = (n:string) => n.replace(/\.[^.]+$/,'')
+const formats = '.mp3,.wav,.m4a,.mp4,.flac,.ogg,.opus,.webm,.aac,.wma,.mov,.mkv'
 
 function App() {
-  const [model, setModel] = useState<ModelChoice>('russian')
-  const [audio, setAudio] = useState<File | null>(null)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
-  const [error, setError] = useState('')
-  const [job, setJob] = useState<Job | null>(null)
-  const [text, setText] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [serverOnline, setServerOnline] = useState<boolean | null>(null)
-  const [hasFfmpeg, setHasFfmpeg] = useState(true)
-  const [models, setModels] = useState<Record<ModelChoice, ModelStatus> | null>(null)
-  const [modelsPath, setModelsPath] = useState('')
-  const [modelsError, setModelsError] = useState('')
-  const [playing, setPlaying] = useState(false)
-  const [duration, setDuration] = useState(0)
-  const [position, setPosition] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const playerRef = useRef<HTMLAudioElement>(null)
-  const fileUrlRef = useRef<string | null>(null)
-  const jobIdRef = useRef<string | null>(null)
-  const pollSequence = useRef(0)
-  const busy = job?.status === 'queued' || job?.status === 'processing'
-  const done = job?.status === 'completed'
+  const [page,setPage] = useState<Page>('transcribe')
+  const [model,setModel] = useState<ModelChoice>('russian')
+  const [mode,setMode] = useState<Mode>('standard')
+  const [device,setDevice] = useState<Device>('auto')
+  const [file,setFile] = useState<File|null>(null)
+  const [url,setUrl] = useState<string|null>(null)
+  const [drag,setDrag] = useState(false)
+  const [models,setModels] = useState<ModelInfo|null>(null)
+  const [deviceInfo,setDeviceInfo] = useState<DeviceInfo|null>(null)
+  const [job,setJob] = useState<Job|null>(null)
+  const [resultText,setResultText] = useState('')
+  const [vadToken,setVadToken] = useState('')
+  const [pendingDelete,setPendingDelete] = useState<'vad'|ModelChoice|null>(null)
+  const [busyUpload,setBusyUpload] = useState(false)
+  const [isDesktop,setIsDesktop] = useState(Boolean(window.pywebview?.api))
+  const jobId = useRef<string|null>(null)
+  const busy=busyUpload||job?.status==='processing'||job?.status==='queued'
+  const ready=job?.status==='completed'&&!!job.result
 
-  useEffect(() => {
-    let mounted = true
-    const check = async () => {
-      try {
-        const r = await fetch('/api/health')
-        if (!r.ok) throw new Error()
-        const data = await r.json()
-        if (mounted) { setServerOnline(true); setHasFfmpeg(data.ffmpeg !== false) }
-      } catch { if (mounted) setServerOnline(false) }
+  useEffect(()=>{
+    const listener=()=>setIsDesktop(Boolean(window.pywebview?.api))
+    window.addEventListener('pywebviewready',listener)
+    return()=>window.removeEventListener('pywebviewready',listener)
+  },[])
+  useEffect(()=>{
+    let active=true
+    const load=async()=>{
+      try{
+        const [mr,hr]=await Promise.all([fetch('/api/models',{cache:'no-store'}),fetch('/api/health',{cache:'no-store'})])
+        if(!mr.ok||!hr.ok)throw new Error('Сервер недоступен')
+        const m:ModelInfo=await mr.json();const h=await hr.json()
+        if(active){setModels(m);setDeviceInfo(h.device)}
+      }catch{if(active)setDeviceInfo(null)}
     }
-    void check()
-    const timer = window.setInterval(check, 12000)
-    return () => { mounted = false; clearInterval(timer) }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    const checkModels = async () => {
-      try {
-        const res = await fetch('/api/models', {cache:'no-store'})
-        if (!res.ok) throw new Error(await readError(res))
-        const data: {models: Record<ModelChoice, ModelStatus>, path: string} = await res.json()
-        if (active) { setModels(data.models); setModelsPath(data.path) }
-      } catch(e) { if (active) setModelsError(e instanceof Error ? e.message : 'Не удалось получить список моделей') }
-    }
-    void checkModels()
-    const timer = window.setInterval(checkModels, 1500)
-    return () => { active = false; clearInterval(timer) }
-  }, [])
-
-  const manageModel = async (choice: ModelChoice) => {
-    const status = models?.[choice]?.status
-    if (!status || status === 'downloading' || busy) return
-    const removing = status === 'installed'
-    if (removing && !window.confirm(`Удалить ${choice === 'russian' ? 'русскоязычную' : 'мультиязычную'} модель с диска?`)) return
-    try {
-      setModelsError('')
-      const response = await fetch(`/api/models/${choice}${removing ? '' : '/download'}`,
-        {method: removing ? 'DELETE' : 'POST', headers: authHeaders()})
-      if (!response.ok) throw new Error(await readError(response))
-      const updated = await fetch('/api/models').then(r => r.json())
-      setModels(updated.models)
-    } catch(e) { setModelsError(e instanceof Error ? e.message : 'Ошибка операции с моделью') }
-  }
-
-  useEffect(() => () => { if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current) }, [])
-
-  const chooseFile = useCallback((file: File) => {
-    const ext = `.${file.name.split('.').at(-1)?.toLowerCase()}`
-    if (!formats.split(',').includes(ext)) { setError('Неподдерживаемый формат. Выберите MP3, WAV, M4A, OGG, FLAC, WebM или MP4.'); return }
-    if (file.size > maxBytes) { setError('Файл слишком большой. Максимум — 200 МБ.'); return }
-    if (file.size === 0) { setError('Файл пустой.'); return }
-    if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current)
-    const url = URL.createObjectURL(file)
-    fileUrlRef.current = url
-    setAudioUrl(url)
-    setAudio(file)
-    setError('')
-    setJob(null)
-    setText('')
-    setPosition(0)
-    setDuration(0)
-    setPlaying(false)
-  }, [])
-
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    setDragging(false)
-    if (busy) return
-    const first = event.dataTransfer.files[0]
-    if (first) chooseFile(first)
-  }
-
-  useEffect(() => {
-    const id = jobIdRef.current
-    if (!id || !busy) return
-    let cancelled = false
-    const sequence = ++pollSequence.current
-    let timer: number | undefined
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/jobs/${id}`, { cache: 'no-store' })
-        if (!res.ok) throw new Error(await readError(res))
-        const next: Job = await res.json()
-        if (cancelled || sequence !== pollSequence.current) return
-        setJob(next)
-        if (next.status === 'completed' && next.result) setText(next.result.text)
-        if (next.status === 'failed') setError(next.error || 'Не удалось распознать аудио')
-        if (next.status === 'processing' || next.status === 'queued') {
-          timer = window.setTimeout(poll, 850)
+    void load();const timer=setInterval(load,1750)
+    return()=>{active=false;clearInterval(timer)}
+  },[])
+  useEffect(()=>{
+    const id=jobId.current
+    if(!id||!busy||busyUpload)return
+    let cancelled=false
+    const poll=async()=>{
+      try{
+        const r=await fetch(`/api/jobs/${id}`,{cache:'no-store'})
+        if(!r.ok)throw new Error(await errMsg(r))
+        const j:Job=await r.json()
+        if(cancelled)return
+        setJob(j)
+        if(j.status==='completed'){
+          setResultText(j.result?.text??'')
+          notifications.show({title:'Готово',message:'Расшифровка завершена',color:'green',icon:<IconCheck size={16}/>})
         }
-      } catch (e) {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Не удалось получить статус задачи')
-        setJob(prev => prev ? { ...prev, status: 'failed' } : null)
+        if(j.status==='failed') notifications.show({title:'Ошибка распознавания',message:j.error||'Неизвестная ошибка',color:'red'})
+      }catch(e){if(!cancelled){setJob(old=>old?{...old,status:'failed',error:String(e)}:old)}}
+    }
+    void poll();const timer=setInterval(poll,1150)
+    return()=>{cancelled=true;clearInterval(timer)}
+  },[job?.status,busyUpload])
+  useEffect(()=>()=>{if(url)URL.revokeObjectURL(url)},[url])
+
+  const pickFile=useCallback((f:File|null)=>{
+    if(!f)return
+    if(!formats.split(',').includes(`.${f.name.split('.').pop()?.toLowerCase()}`)){
+      notifications.show({message:'Неподдерживаемый формат',color:'red'});return
+    }
+    if(!f.size||f.size>200*1024*1024){notifications.show({message:'Файл пустой или превышает 200 МБ',color:'red'});return}
+    setUrl(old=>{if(old)URL.revokeObjectURL(old);return URL.createObjectURL(f)})
+    setFile(f);setJob(null);jobId.current=null;setResultText('')
+  },[])
+  const onDrop=(e:DragEvent)=>{e.preventDefault();setDrag(false);if(!busy)pickFile(e.dataTransfer.files[0])}
+  const upload=async()=>{
+    if(!file||busy)return
+    if(!models?.models[model]?.installed){setPage('models');notifications.show({message:'Сначала скачайте выбранную модель',color:'yellow'});return}
+    if(mode==='vad'&&!models.vad.installed){setPage('models');notifications.show({message:'Для VAD сначала загрузите модель сегментации',color:'yellow'});return}
+    const body=new FormData();body.append('file',file);body.append('model',model);body.append('mode',mode);body.append('device',device)
+    setBusyUpload(true);setJob(null);setResultText('')
+    try{
+      const r=await fetch('/api/jobs',{method:'POST',headers:auth(),body})
+      if(!r.ok)throw new Error(await errMsg(r))
+      const data=await r.json()
+      jobId.current=data.job_id
+      setJob({id:data.job_id,status:'queued',progress:0,detail:'В очереди'})
+    }catch(e){notifications.show({message:String(e),color:'red'})}
+    finally{setBusyUpload(false)}
+  }
+  const manage=async(kind:'vad'|ModelChoice,remove=false)=>{
+    if(busy)return
+    try{
+      const r=await fetch(kind==='vad'?`/api/vad${remove?'':'/download'}`:`/api/models/${kind}${remove?'':'/download'}`,{
+        method:remove?'DELETE':'POST',headers:{...auth(),...(kind==='vad'&&!remove?{'Content-Type':'application/json'}:{})},
+        body:kind==='vad'&&!remove?JSON.stringify({token:vadToken}):undefined,
+      })
+      if(!r.ok)throw new Error(await errMsg(r))
+      if(kind==='vad')setVadToken('')
+      const mr=await fetch('/api/models');if(mr.ok)setModels(await mr.json())
+      notifications.show({message:remove?'Модель удалена':'Загрузка запущена',color:remove?'gray':'indigo'})
+    }catch(e){notifications.show({title:'Операция не выполнена',message:String(e),color:'red'})}
+  }
+  const exportText=async(ext:'txt'|'srt')=>{
+    if(!job?.result)return
+    const content=ext==='txt'?resultText:(job.result.segments.map((s,i)=>`${i+1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}`).join('\n\n'))
+    const filename=`${baseName(file?.name||'transcription')}.${ext}`
+    try{
+      if(window.pywebview?.api?.save_text){
+        const written=await window.pywebview.api.save_text(filename,content)
+        if(written)notifications.show({message:'Файл сохранён',color:'green'})
+      }else{
+        const link=document.createElement('a');const uri=URL.createObjectURL(new Blob(['\ufeff'+content],{type:'text/plain;charset=utf-8'}))
+        link.href=uri;link.download=filename;document.body.appendChild(link);link.click();link.remove()
+        setTimeout(()=>URL.revokeObjectURL(uri),10000)
       }
-    }
-    void poll()
-    return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [job?.status, job?.id, busy])
-
-  const start = async () => {
-    if (!audio || busy || models?.[model]?.status !== 'installed') return
-    setError('')
-    setJob(null)
-    setText('')
-    jobIdRef.current = null
-    const form = new FormData()
-    form.append('file', audio)
-    form.append('model', model)
-    try {
-      setJob({ id: '', filename: audio.name, model, status: 'queued', phase: 'upload', progress: 0, detail: 'Загрузка файла на локальный сервер' })
-      const res = await fetch('/api/jobs', { method: 'POST', headers: authHeaders(), body: form })
-      if (!res.ok) throw new Error(await readError(res))
-      const data: { job_id: string } = await res.json()
-      jobIdRef.current = data.job_id
-      setJob({ id: data.job_id, filename: audio.name, model, status: 'queued', phase: 'queued', progress: 0, detail: 'В очереди' })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось подключиться к серверу')
-      setJob(null)
-      setServerOnline(false)
-    }
+    }catch(e){notifications.show({title:'Ошибка сохранения',message:String(e),color:'red'})}
   }
+  const installedCount=Number(models?.models.russian.installed||false)+Number(models?.models.multilingual.installed||false)
+  const nav=[{key:'transcribe',label:'Расшифровка',icon:IconMicrophone},{key:'models',label:'Модели',icon:IconFolder},{key:'settings',label:'Настройки',icon:IconSettings}] as const
 
-  const reset = () => {
-    if (busy) return
-    if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current)
-    fileUrlRef.current = null
-    jobIdRef.current = null
-    setAudioUrl(null); setAudio(null); setJob(null); setText(''); setError(''); setDuration(0); setPosition(0)
-    if (inputRef.current) inputRef.current.value = ''
-  }
-
-  const copyText = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    } catch { setError('Не удалось скопировать текст. Используйте Ctrl+C.') }
-  }
-
-  const srt = () => (job?.result?.segments || [])
-    .map((s, i) => `${i + 1}\n${fmtSrt(s.start)} --> ${fmtSrt(s.end)}\n${s.text}\n`).join('\n')
-  const resultName = `${baseName(audio?.name || 'transcript')}_transcript`
-
-  return (
-    <div className="app">
+  return <div className="app-root">
+    {isDesktop&&<div className="windowbar">
+      <div className="windowbrand pywebview-drag-region"><IconAudioLines size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3</span></div>
+      <div className="windowactions">
+        <button aria-label="Свернуть" onClick={()=>void window.pywebview?.api?.minimize()}><IconMinus size={16}/></button>
+        <button aria-label="Развернуть" onClick={()=>void window.pywebview?.api?.toggle_maximize()}><IconSquare size={13}/></button>
+        <button aria-label="Закрыть" className="windowclose" onClick={()=>void window.pywebview?.api?.close()}><IconX size={17}/></button>
+      </div>
+    </div>}
+    <div className="app-layout">
       <aside className="sidebar">
-        <div className="logo"><span className="logo-icon"><AudioLines size={22} strokeWidth={2.4}/></span><span>giga<span className="logo-accent">scribe</span><small>STUDIO</small></span></div>
-        <div className="side-nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
-        <div className="side-item active"><Waves size={18}/> Расшифровка <span className="side-marker"/></div>
-        <div className="side-spacer"/>
+        <div className="sidebar-heading"><div className="app-mark"><IconAudioLines size={21}/></div><div><Text fw={700} size="sm">GigaScribe</Text><Text c="dimmed" size="xs">Локальная транскрибация</Text></div></div>
+        <Text size="xs" c="dimmed" tt="uppercase" fw={600} mt={26} mb={8} ml={13}>Рабочее пространство</Text>
+        <nav className="nav">
+          {nav.map(n=><button key={n.key} className={page===n.key?'active':''} onClick={()=>setPage(n.key)}><n.icon size={19} stroke={1.7}/>{n.label}</button>)}
+        </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-note"><ShieldCheck size={18} className="green"/><div><strong>Приватность прежде всего</strong><p>Аудио обрабатывается на вашем компьютере и не отправляется в облако.</p></div></div>
-          <a href="https://github.com/salute-developers/GigaAM" target="_blank" rel="noopener noreferrer" className="powered">Основано на GigaAM <ArrowRight size={15}/></a>
+          <Group gap="xs" wrap="nowrap"><Badge variant="light" color={deviceInfo?.cuda_available?'green':'gray'} size="sm">{deviceInfo?.cuda_available?'CUDA доступна':'CPU'}</Badge><Text size="xs" c="dimmed" lineClamp={1}>{installedCount}/2 моделей</Text></Group>
+          <Text size="xs" c="dimmed" mt={9}>Всё аудио обрабатывается на вашем компьютере</Text>
         </div>
       </aside>
-
-      <div className="main-shell">
-        <header className="topbar"><div className="breadcrumb">Инструменты <span>/</span> <strong>Расшифровка аудио</strong></div><div className={`server-indicator ${serverOnline === false ? 'offline' : ''}`}><i className="live-dot"/>{serverOnline === null ? 'Подключение...' : serverOnline ? 'Локальный сервер активен' : 'Сервер недоступен'}</div></header>
-        <main className="content">
-          <div className="hero">
-            <div className="hero-eyebrow"><Sparkles size={13}/> РАСПОЗНАВАНИЕ РЕЧИ НА БАЗЕ ИИ</div>
-            <h1>Превратите звук<br/><span>в понятный текст.</span></h1>
-            <p>Загрузите аудиозапись, выберите модель Сбера и получите расшифровку. Всё локально, без API-ключей и отправки файлов в облако.</p>
-            <div className="hero-art" aria-hidden="true"><div className="orb orb-one"/><div className="orb orb-two"/><div className="hero-wave">{Array.from({ length: 34 }, (_, i) => <span key={i} style={{height: `${16 + 65 * Math.abs(Math.sin(i * 0.54 + 0.3)) * (0.75 + 0.25 * Math.cos(i * 0.19))}%`}}/>)}</div></div>
-          </div>
-
-          <div className="workspace-grid">
-            <section className="left-column">
-              <div className="section-title"><span className="step-number">01</span><div><h2>Аудиофайл</h2><p>Начните с загрузки записи</p></div></div>
-              <input type="file" ref={inputRef} accept={formats} className="visually-hidden" onChange={(e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) chooseFile(f) }} />
-              {!audio ? (
-                <div className={`drop-zone ${dragging ? 'dragging' : ''}`} role="button" tabIndex={busy ? -1 : 0}
-                  onClick={() => inputRef.current?.click()}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click() } }}
-                  onDragEnter={e => { e.preventDefault(); setDragging(true) }}
-                  onDragOver={e => e.preventDefault()}
-                  onDragLeave={e => { e.preventDefault(); if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false) }}
-                  onDrop={onDrop}>
-                  <div className="drop-icon"><CloudUpload size={28} strokeWidth={1.8}/></div>
-                  <h3>Перетащите аудиофайл сюда</h3>
-                  <p>или нажмите, чтобы выбрать на компьютере</p>
-                  <button type="button" className="btn choose-btn" onClick={e => { e.stopPropagation(); inputRef.current?.click() }}><FolderOpen size={16}/> Выбрать файл</button>
-                  <div className="format-hint">MP3, WAV, M4A, FLAC, OGG, WebM, MP4 · до 200 МБ</div>
-                </div>
-              ) : (
-                <div className="file-card">
-                  <div className="file-card-top"><span className="file-symbol"><FileAudio2 size={25}/></span><div className="file-identity"><strong title={audio.name}>{audio.name}</strong><span>{fmtSize(audio.size)} · Аудиозапись</span></div><button disabled={busy} className="icon-button" aria-label="Убрать файл" onClick={reset}><X size={19}/></button></div>
-                  {audioUrl && <audio ref={playerRef} src={audioUrl} preload="metadata" onLoadedMetadata={e => setDuration(e.currentTarget.duration)} onTimeUpdate={e => setPosition(e.currentTarget.currentTime)} onEnded={() => setPlaying(false)}/>}
-                  <div className="audio-controls"><button className="play-button" aria-label={playing ? 'Пауза' : 'Воспроизвести'} onClick={() => { if (!playerRef.current) return; if (playing) { playerRef.current.pause(); setPlaying(false) } else { void playerRef.current.play().then(() => setPlaying(true)).catch(() => setError('Браузер не поддерживает воспроизведение этого формата. Расшифровка всё равно доступна.')) } }}>{playing ? <Pause size={17} fill="currentColor"/> : <Play size={17} fill="currentColor"/>}</button><span className="timer">{fmtTime(position)}</span><input className="seek" type="range" min="0" max={duration || 1} step="0.05" value={position} aria-label="Позиция аудио" onChange={e => { const value = Number(e.target.value); setPosition(value); if (playerRef.current) playerRef.current.currentTime = value }}/><span className="timer">{fmtTime(duration)}</span></div>
-                  <span className="file-success"><Check size={14}/> Файл выбран и готов к обработке</span>
-                </div>
-              )}
-
-              <div className="section-title model-title"><span className="step-number">02</span><div><h2>Модель распознавания</h2><p>Выберите подходящий язык записи</p></div></div>
-              <div className="models">
-                <button type="button" className={`model-card ${model === 'russian' ? 'selected' : ''}`} disabled={busy} onClick={() => setModel('russian')}>
-                  <span className="model-icon ru"><Mic2 size={20}/></span><span className="model-details"><span className="model-name">Русскоязычная <span className="mini-tag">РЕКОМЕНДУЕМ</span></span><span className="model-desc">GigaAM v3 · e2e RNN-T</span><span className="model-extra">Русский язык · знаки препинания</span></span><span className="radio-mark">{model === 'russian' && <Check size={12} strokeWidth={3}/>}</span>
-                </button>
-                <button type="button" className={`model-card ${model === 'multilingual' ? 'selected' : ''}`} disabled={busy} onClick={() => setModel('multilingual')}>
-                  <span className="model-icon ml"><Globe2 size={20}/></span><span className="model-details"><span className="model-name">Мультиязычная</span><span className="model-desc">GigaAM Multilingual · CTC</span><span className="model-extra">RU · EN · KK · KY · UZ</span></span><span className="radio-mark">{model === 'multilingual' && <Check size={12} strokeWidth={3}/>}</span>
-                </button>
+      <main className="content"><ScrollArea h="100%" type="scroll" scrollbarSize={7}><div className="content-inner">
+        {page==='transcribe'&&<Stack gap="lg">
+          <header className="page-header"><Text size="sm" c="dimmed" mb={3}>РАБОЧАЯ ОБЛАСТЬ</Text><Title order={2}>Расшифровка аудио</Title><Text c="dimmed" size="sm" mt={6}>Загрузите запись, выберите модель и получите текст.</Text></header>
+          <SimpleGrid cols={{base:1,md:2}} spacing="md">
+            <Card className="panel" padding="lg" radius="lg" withBorder>
+              <Group justify="space-between" mb="md"><Text fw={600}>1. Аудиофайл</Text><Badge variant="light" color="gray">До 200 МБ</Badge></Group>
+              <div className={'dropzone'+(drag?' dragging':'')} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onDrop={onDrop}>
+                <IconUpload size={28} stroke={1.45} color="var(--mantine-color-dimmed)"/>
+                <Text fw={600} size="sm" mt="sm">{file?file.name:'Перетащите аудиофайл сюда'}</Text>
+                <Text size="xs" c="dimmed" mt={4}>{file?`${fmtSize(file.size)} · готов к обработке`:'MP3, M4A, WAV, FLAC, OGG и другие'}</Text>
+                <FileButton onChange={pickFile} accept={formats} disabled={busy}><Button size="xs" variant="default" mt="lg" leftSection={<IconFolder size={15}/>}>{file?'Заменить файл':'Выбрать файл'}</Button></FileButton>
               </div>
-              <div className="manager-panel">
-                <div className="manager-heading"><div><strong>Установленные модели</strong><small>Скачиваются только по вашему выбору</small></div><span className="manager-spark">✦</span></div>
-                {(['russian', 'multilingual'] as const).map(choice => {
-                  const entry = models?.[choice]
-                  const status = entry?.status
-                  return <div className="manager-row" key={choice}>
-                    <span className={`manager-dot ${status === 'installed' ? 'ready' : status || ''}`}/>
-                    <div className="manager-identity"><strong>{choice === 'russian' ? 'Русскоязычная' : 'Мультиязычная'}</strong>
-                      <small>{status === 'installed' ? `Установлена · ${fmtSize(entry.size_bytes)}` : status === 'downloading' ? `${entry.detail} · ${entry.progress}%` : status === 'failed' ? 'Ошибка загрузки' : status === 'not_installed' ? 'Не установлена' : 'Проверка...'}</small>
-                      {status === 'downloading' && <div className="manager-progress"><span style={{width:`${entry.progress}%`}}/></div>}
-                    </div>
-                    <button type="button" className={`manager-action ${status === 'installed' ? 'danger' : ''}`} disabled={busy || !status || status === 'downloading'} onClick={() => void manageModel(choice)}>{status === 'installed' ? 'Удалить' : status === 'failed' ? 'Повторить' : status === 'downloading' ? 'Загрузка...' : 'Скачать'}</button>
-                  </div>
-                })}
-                <div className="manager-footer"><span>Папка моделей</span><button type="button" onClick={() => void navigator.clipboard.writeText(modelsPath)}>▢ Копировать путь</button></div>
-                <div className="manager-path">{modelsPath || 'Проверка расположения...'}</div>
-                {!!modelsError && <div className="models-error" role="alert">{modelsError}</div>}
-              </div>
-              <div className="model-hint"><Languages size={16}/><span>{model === 'russian' ? 'Лучший выбор для русской речи. Модель умеет расставлять пунктуацию и приводить текст к читаемому виду.' : 'Распознаёт 5 языков. Результат может быть без заглавных букв и знаков препинания — особенность CTC-модели.'}</span></div>
-              <button type="button" className="btn primary-btn" disabled={!audio || busy || serverOnline === false || !hasFfmpeg || models?.[model]?.status !== 'installed'} onClick={() => void start()}>{busy ? <><LoaderCircle size={19} className="spin"/> Обрабатываем аудио...</> : models?.[model]?.status !== 'installed' ? 'Сначала скачайте выбранную модель' : <><AudioLines size={19}/> Расшифровать аудио <ArrowRight size={19}/></>}</button>
-              {!hasFfmpeg && <p className="notice">FFmpeg не обнаружен. Установите его по инструкции из README.</p>}
-              {serverOnline === false && <p className="notice">Запустите сервер: <code>uvicorn backend.main:app --host 127.0.0.1 --port 8000</code></p>}
-            </section>
-
-            <section className="right-column">
-              <div className="section-title right-head"><span className="step-number">03</span><div><h2>Результат</h2><p>Ваша готовая расшифровка</p></div>{done && <span className="done-tag"><CheckCheck size={15}/> Готово</span>}</div>
-              <div className={`result-box ${done ? 'has-result' : ''}`}>
-                {!job ? (
-                  <div className="empty-state"><div className="empty-illustration"><div className="empty-aura"/><FileText size={39} strokeWidth={1.2}/><span className="tiny-star"><Sparkles size={17}/></span></div><h3>Здесь появится текст</h3><p>Загрузите запись, выберите модель и нажмите «Расшифровать аудио»</p><div className="empty-line"/><div className="empty-line short"/><div className="empty-line medium"/></div>
-                ) : busy ? (
-                  <div className="progress-state"><div className="working-icon"><AudioLines size={29}/></div><h3>Обрабатываем вашу запись</h3><p>{job.detail || 'Запускаем обработку...'}</p><div className="progress-meta"><span>Прогресс</span><strong>{job.progress}%</strong></div><div className="progress-track"><div className="progress-fill" style={{width: `${job.progress}%`}}/></div><p className="progress-note">Расшифровка выполняется локально. Длинные записи могут обрабатываться несколько минут.</p></div>
-                ) : job.status === 'failed' ? (
-                  <div className="failed-state"><CircleAlert size={37}/><h3>Не получилось распознать</h3><p>{error || job.error || 'Проверьте файл и попробуйте ещё раз'}</p><button type="button" className="btn retry-btn" onClick={() => void start()}><RotateCcw size={16}/> Повторить</button></div>
-                ) : (
-                  <div className="transcript-content"><div className="result-meta"><span><Clock3 size={15}/> {fmtTime(job.result?.duration || duration)}</span><span className="meta-divider"/><span>{job.result?.model === 'russian' ? 'GigaAM v3' : 'GigaAM Multilingual'}</span><span className="result-count">{text.trim().split(/\s+/).filter(Boolean).length} слов</span></div><textarea aria-label="Текст расшифровки, можно редактировать" spellCheck={false} className="transcript-input" placeholder="В аудио не обнаружено распознаваемой речи" value={text} onChange={e => setText(e.target.value)}/><div className="edit-tip">Вы можете отредактировать текст перед сохранением</div></div>
-                )}
-              </div>
-              <div className="result-actions"><button type="button" disabled={!done || !text} onClick={() => void copyText()} className="btn action-btn">{copied ? <Check size={16}/> : <Clipboard size={16}/>} {copied ? 'Скопировано' : 'Копировать'}</button><button type="button" disabled={!done || !text} onClick={() => saveFile(text, `${resultName}.txt`)} className="btn action-btn"><ArrowDownToLine size={16}/> Скачать TXT</button><button type="button" disabled={!done || !job?.result?.segments.length} onClick={() => saveFile(srt(), `${resultName}.srt`, 'text/srt;charset=utf-8')} className="btn action-btn"><FileText size={16}/> Скачать SRT</button></div>
-              <div className="privacy-footer"><ShieldCheck size={16}/><span>Без облака и подписок. Веса моделей скачиваются отдельно только по вашему выбору.</span></div>
-            </section>
-          </div>
-          <footer className="footer"><span>GigaScribe · локальная расшифровка речи</span><span>Сделано на открытых моделях <a href="https://github.com/salute-developers/GigaAM" target="_blank" rel="noopener noreferrer">GigaAM</a></span></footer>
-        </main>
-      </div>
+              {url&&<audio className="audio-player" src={url} controls preload="metadata"/>}
+            </Card>
+            <Card className="panel" padding="lg" radius="lg" withBorder>
+              <Text fw={600} mb="md">2. Параметры</Text>
+              <Stack gap="md">
+                <NativeSelect label="Модель распознавания" value={model} onChange={e=>setModel(e.currentTarget.value as ModelChoice)} disabled={busy} data={[{value:'russian',label:'Русская · GigaAM v3 RNNT'},{value:'multilingual',label:'Мультиязычная · GigaAM CTC'}]}/>
+                {!models?.models[model]?.installed&&<Alert color="yellow" variant="light" icon={<IconInfoCircle size={17}/>} title="Модель не установлена"><Text size="xs">Перейдите в «Модели», чтобы скачать её.</Text></Alert>}
+                <div><Text size="sm" fw={500} mb={7}>Обработка длинной записи</Text><SegmentedControl fullWidth value={mode} onChange={v=>setMode(v as Mode)} disabled={busy} data={[{label:'Стандартная',value:'standard'},{label:'Умная (VAD)',value:'vad'}]}/><Text c="dimmed" size="xs" mt={7}>{mode==='vad'?'Разделение по речи; требуется отдельная модель VAD.':'Быстрое разделение на фрагменты до 23 секунд.'}</Text></div>
+                <NativeSelect label="Устройство" value={device} onChange={e=>setDevice(e.currentTarget.value as Device)} disabled={busy} data={[{label:'Автоматически (GPU при наличии)',value:'auto'},{label:'NVIDIA CUDA',value:'cuda',disabled:!deviceInfo?.cuda_available},{label:'Процессор (CPU)',value:'cpu'}]}/>
+              </Stack>
+            </Card>
+          </SimpleGrid>
+          <Card className="panel" padding="lg" radius="lg" withBorder>
+            <Group justify="space-between" align="center"><div><Text fw={600}>3. Запуск</Text><Text size="xs" c="dimmed" mt={3}>{job?.detail||'Результат появится ниже после обработки'}</Text></div><Button leftSection={busy?<IconRefresh size={17}/>:<IconPlayerPlay size={17}/>} loading={busy} disabled={!file||!models?.models[model]?.installed||(mode==='vad'&&!models?.vad.installed)} onClick={()=>void upload()}>Расшифровать</Button></Group>
+            {busy&&<Progress mt="md" value={job?.progress||5} animated radius="sm"/>}
+            {job?.status==='failed'&&<Alert color="red" mt="md" title="Ошибка распознавания">{job.error}</Alert>}
+          </Card>
+          <Card className="panel" padding="lg" radius="lg" withBorder>
+            <Group justify="space-between" align="center" mb="md"><Group gap="sm"><Text fw={600}>Результат</Text>{ready&&<Badge color="green" variant="light">Готово · {fmtTime(job!.result!.duration)}</Badge>}</Group><Group gap="xs"><Button variant="default" size="xs" leftSection={<IconCopy size={15}/>} disabled={!ready} onClick={()=>void navigator.clipboard.writeText(resultText).then(()=>notifications.show({message:'Скопировано',color:'green'}))}>Копировать</Button><Button variant="light" size="xs" leftSection={<IconDownload size={15}/>} disabled={!ready} onClick={()=>void exportText('txt')}>TXT</Button><Button variant="default" size="xs" disabled={!ready} onClick={()=>void exportText('srt')}>SRT</Button></Group></Group>
+            <Textarea minRows={9} autosize maxRows={25} placeholder="Здесь появится расшифрованный текст. Его можно будет отредактировать перед сохранением." value={resultText} onChange={e=>setResultText(e.currentTarget.value)} disabled={!ready}/>
+            {ready&&<Text size="xs" c="dimmed" mt="sm">Распознано на {job!.result!.device.toUpperCase()} · {job!.result!.segments.length} фрагментов. Изменения текста учитываются при экспорте в TXT.</Text>}
+          </Card>
+        </Stack>}
+        {page==='models'&&<Stack gap="lg">
+          <header className="page-header"><Text size="sm" c="dimmed" mb={3}>УПРАВЛЕНИЕ ХРАНИЛИЩЕМ</Text><Title order={2}>Модели</Title><Text c="dimmed" size="sm" mt={6}>Скачивайте только нужные модели. Удаление не влияет на остальные.</Text></header>
+          {(['russian','multilingual'] as const).map(choice=>{
+            const m=models?.models[choice]
+            return <Card key={choice} className="panel" padding="lg" withBorder radius="lg">
+              <Group justify="space-between" align="flex-start" wrap="nowrap"><Group align="flex-start" gap="md" wrap="nowrap"><div className="model-icon">{choice==='russian'?<IconMicrophone size={22}/>:<IconAudioLines size={22}/>}</div><div><Text fw={600}>{choice==='russian'?'GigaAM v3 Russian':'GigaAM Multilingual'}</Text><Text c="dimmed" size="sm" mt={3}>{choice==='russian'?'Русская речь, пунктуация и регистр':'RU · EN · KK · KY · UZ'}</Text><Group gap="xs" mt="sm"><Badge variant="light" color={m?.installed?'green':m?.status==='failed'?'red':'gray'}>{m?.status==='downloading'?'Загружается':m?.installed?'Установлена':m?.status==='failed'?'Ошибка':'Не установлена'}</Badge>{m?.size_bytes? <Text size="xs" c="dimmed">{fmtSize(m.size_bytes)}</Text>:null}</Group></div></Group>
+                {m?.installed?<Button variant="subtle" color="red" size="sm" leftSection={<IconTrash size={16}/>} disabled={busy} onClick={()=>setPendingDelete(choice)}>Удалить</Button>:<Button variant="default" size="sm" leftSection={<IconCloudDownload size={17}/>} loading={m?.status==='downloading'} disabled={busy} onClick={()=>void manage(choice)}>Скачать</Button>}
+              </Group>
+              {m?.status==='downloading'&&<><Progress value={m.progress} mt="md" size="sm"/><Text c="dimmed" size="xs" mt={5}>{m.detail}</Text></>}
+              {m?.error&&<Alert color="red" mt="md">{m.error}</Alert>}
+            </Card>
+          })}
+          <Card className="panel" padding="lg" withBorder radius="lg">
+            <Group align="flex-start" justify="space-between"><div><Text fw={600}>VAD · pyannote segmentation 3.0</Text><Text size="sm" c="dimmed" mt={4}>Необязательная модель для умного деления длинных записей</Text><Badge mt="sm" color={models?.vad.installed?'green':'gray'} variant="light">{models?.vad.installed?'Установлена':models?.vad.status==='downloading'?'Загрузка...':'Не установлена'}</Badge></div>{models?.vad.installed?<Button color="red" variant="subtle" disabled={busy} leftSection={<IconTrash size={16}/>} onClick={()=>setPendingDelete('vad')}>Удалить</Button>:null}</Group>
+            {!models?.vad.installed&&<Stack gap="xs" mt="lg"><Text size="sm" c="dimmed">Для загрузки нужен токен Hugging Face после принятия условий доступа к pyannote/segmentation-3.0. Токен не сохраняется.</Text><Group align="end"><TextInput style={{flex:1}} label="Hugging Face token" type="password" value={vadToken} onChange={e=>setVadToken(e.currentTarget.value)} placeholder="hf_…" autoComplete="off"/><Button variant="default" leftSection={<IconCloudDownload size={16}/>} loading={models?.vad.status==='downloading'} disabled={!vadToken.trim()||busy} onClick={()=>void manage('vad')}>Скачать VAD</Button></Group></Stack>}
+            {models?.vad.status==='downloading'&&<Progress animated value={models.vad.progress} mt="md"/>}
+            {models?.vad.error&&<Alert color="red" mt="md">{models.vad.error}</Alert>}
+          </Card>
+          <Paper className="path-panel" p="md" radius="md"><Group gap="xs"><IconFolder size={18}/><Text size="sm" fw={600}>Расположение моделей</Text></Group><Text c="dimmed" size="sm" mt={7} style={{wordBreak:'break-all'}}>{models?.path||'Получение пути...'}</Text></Paper>
+        </Stack>}
+        {page==='settings'&&<Stack gap="lg">
+          <header className="page-header"><Text c="dimmed" size="sm" mb={3}>СИСТЕМА</Text><Title order={2}>Настройки и диагностика</Title><Text c="dimmed" size="sm" mt={6}>Выбранное устройство видно при расшифровке.</Text></header>
+          <Card className="panel" withBorder radius="lg" padding="lg"><Group gap="sm" mb="lg"><IconCpu size={22}/><Text fw={600}>Ускорение NVIDIA</Text></Group><Stack gap="sm"><Group justify="space-between"><Text size="sm" c="dimmed">CUDA</Text><Badge variant="light" color={deviceInfo?.cuda_available?'green':'red'}>{deviceInfo?.cuda_available?'Доступна':'Недоступна'}</Badge></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Устройство</Text><Text size="sm">{deviceInfo?.gpu_name||'CPU'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Версия PyTorch</Text><Text size="sm">{deviceInfo?.torch_version||'—'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">CUDA runtime</Text><Text size="sm">{deviceInfo?.cuda_runtime||'—'}</Text></Group></Stack>{deviceInfo?.reason&&<Alert mt="lg" color="yellow" icon={<IconInfoCircle size={17}/>}>{deviceInfo.reason}</Alert>}</Card>
+          <Card className="panel" withBorder radius="lg" padding="lg"><Text fw={600}>Файлы моделей</Text><Text size="sm" c="dimmed" mt={8} style={{wordBreak:'break-all'}}>{models?.path||'—'}</Text><Text size="xs" c="dimmed" mt="sm">Все веса остаются на диске при обновлении установленной версии приложения.</Text></Card>
+        </Stack>}
+        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3 · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
+      </div></ScrollArea></main>
     </div>
-  )
+    <Modal centered title="Удалить модель?" opened={pendingDelete!==null} onClose={()=>setPendingDelete(null)}>
+      <Text size="sm">Файлы выбранной модели будут удалены с компьютера. При необходимости её можно скачать повторно.</Text>
+      <Group justify="flex-end" mt="xl"><Button variant="default" onClick={()=>setPendingDelete(null)}>Отмена</Button><Button color="red" onClick={()=>{const choice=pendingDelete;setPendingDelete(null);if(choice)void manage(choice,true)}}>Удалить модель</Button></Group>
+    </Modal>
+  </div>
 }
-
 export default App

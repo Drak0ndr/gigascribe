@@ -90,9 +90,11 @@ def test_local_job_end_to_end_with_fake_model(monkeypatch):
 def test_static_frontend():
     page = client.get('/')
     assert page.status_code == 200
-    assert 'GigaScribe' in page.text
-    assert client.get('/app.js').status_code == 200
-    assert client.get('/styles.css').status_code == 200
+    from backend.main import DIST
+    if (DIST / 'index.html').exists():
+        assert 'GigaScribe' in page.text
+    else:
+        assert 'npm run build' in page.text
 
 
 def test_models_not_automatically_downloaded(monkeypatch, tmp_path):
@@ -187,7 +189,7 @@ def test_desktop_launcher_local_window(monkeypatch):
         with urlopen(url.replace('/?token=', '/api/health?token='), timeout=2) as response:
             assert response.status == 200
 
-    fake_webview = types.SimpleNamespace(create_window=create_window, start=lambda **kwargs: None)
+    fake_webview = types.SimpleNamespace(settings={}, create_window=create_window, start=lambda **kwargs: None)
     monkeypatch.setitem(sys.modules, 'webview', fake_webview)
     main()
     assert observed['title'].startswith('GigaScribe')
@@ -281,13 +283,139 @@ def test_load_model_installs_pcm_adapter(monkeypatch, tmp_path):
 
 
 def test_desktop_self_check_without_models(monkeypatch, tmp_path):
-    """The frozen EXE smoke check should require no downloaded checkpoints."""
+    """The frozen EXE smoke check must not download any model weights."""
     import sys
     import types
     import tempfile
+    import torch
+    import backend.main as backend_main
     from desktop import self_check
 
+    frontend = tmp_path / 'frontend-dist'
+    (frontend / 'assets').mkdir(parents=True)
+    (frontend / 'index.html').write_text('<div>GigaScribe</div>')
+    monkeypatch.setattr(backend_main, 'DIST', frontend)
+    monkeypatch.setattr(torch.version, 'cuda', '12.8')
     monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda: None))
+    monkeypatch.setitem(sys.modules, 'pyannote', types.ModuleType('pyannote'))
+    monkeypatch.setitem(sys.modules, 'pyannote.audio', types.ModuleType('pyannote.audio'))
+    monkeypatch.setitem(sys.modules, 'torchcodec', types.ModuleType('torchcodec'))
     monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
-    assert self_check() == 0
+    assert self_check() == 0, (tmp_path / 'gigascribe-desktop-self-check.log').read_text()
     assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text()
+
+
+def test_select_device_and_missing_cuda(monkeypatch):
+    from backend import transcription
+    monkeypatch.setattr(transcription, 'device_info', lambda: {'cuda_available': False, 'reason':'CPU-only'})
+    assert transcription.resolve_device('cpu') == 'cpu'
+    assert transcription.resolve_device('auto') == 'cpu'
+    import pytest
+    with pytest.raises(RuntimeError, match='GPU NVIDIA недоступна'):
+        transcription.resolve_device('cuda')
+    monkeypatch.setattr(transcription, 'device_info', lambda: {'cuda_available': True})
+    assert transcription.resolve_device('auto') == 'cuda'
+    assert transcription.resolve_device('cuda') == 'cuda'
+
+
+def test_vad_requires_independent_download(monkeypatch, tmp_path):
+    from backend import vad_store
+    monkeypatch.setenv('GIGASCRIBE_MODELS_DIR', str(tmp_path / 'models'))
+    assert not vad_store.installed()
+    response=client.post('/api/jobs',files={'file':('x.wav',b'audio')},data={'model':'russian','mode':'vad'})
+    assert response.status_code==409
+    assert 'VAD' in response.json()['detail']
+    assert client.post('/api/vad/download',json={'token':''}).status_code==422
+
+
+def test_vad_store_download_delete_no_network(monkeypatch,tmp_path):
+    from backend import vad_store
+    from pathlib import Path
+    import sys
+    import types
+    monkeypatch.setenv('GIGASCRIBE_MODELS_DIR', str(tmp_path / 'models'))
+    (vad_store.weights_dir() / 'config.yaml').parent.mkdir(parents=True)
+    def snapshot_download(*, repo_id, local_dir, token, ignore_patterns):
+        assert token=='hf_test'
+        assert repo_id=='pyannote/segmentation-3.0'
+        Path(local_dir,'model.safetensors').write_bytes(b'weights')
+        Path(local_dir,'config.yaml').write_bytes(b'config')
+    monkeypatch.setitem(sys.modules, 'huggingface_hub', types.SimpleNamespace(snapshot_download=snapshot_download))
+    monkeypatch.setattr(vad_store,'_state',{'status':'not_installed','progress':0,'detail':'','error':None})
+    assert vad_store.begin_download()
+    assert not vad_store.begin_download()
+    vad_store.download('hf_test')
+    assert vad_store.installed()
+    assert vad_store.status()['installed'] is True
+    vad_store.delete()
+    assert not vad_store.installed()
+
+
+def test_vad_patch_disables_external_file_decoder(monkeypatch,tmp_path):
+    """Ensure official longform gets a decoded tensor rather than requiring FFmpeg."""
+    import sys,types
+    from backend import transcription, vad_store
+    import torch
+    monkeypatch.setattr(vad_store, 'installed', lambda:True)
+    monkeypatch.setattr(vad_store, 'weights_dir', lambda:tmp_path)
+    mod=types.ModuleType('gigaam.vad_utils')
+    class Pipeline:
+        def __call__(self, data):
+            assert data['sample_rate']==16000
+            assert tuple(data['waveform'].shape)==(1,16000)
+            return 'segments'
+    mod.get_pipeline=lambda device, model_id='pyannote/segmentation-3.0':Pipeline()
+    mod._PIPELINE=None
+    monkeypatch.setitem(sys.modules, 'gigaam', types.ModuleType('gigaam'))
+    monkeypatch.setitem(sys.modules,'gigaam.vad_utils',mod)
+    with wave.open(str(tmp_path/'x.wav'),'wb') as f:
+        f.setnchannels(1);f.setsampwidth(2);f.setframerate(16000)
+        f.writeframes(b'\x00\x00'*16000)
+    transcription._prepare_vad_adapter()
+    assert mod.get_pipeline(torch.device('cpu'))(str(tmp_path/'x.wav'))=='segments'
+
+
+def test_longform_uses_official_api_with_vad(monkeypatch, tmp_path):
+    """Regression: official GigaAM longform, not our custom split_wav path."""
+    import types
+    from backend import transcription
+    import wave
+    sample = tmp_path / 'input.wav'
+    with wave.open(str(sample), 'wb') as w:
+        w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
+        w.writeframes(b'\x00\x00' * 32000)
+
+    class FakeModel:
+        def transcribe_longform(self, path, fr_batch_size, fr_num_workers):
+            assert Path(path).name == 'converted.wav'
+            assert fr_batch_size == 2
+            assert fr_num_workers == 0
+            return types.SimpleNamespace(segments=[types.SimpleNamespace(start=0.2, end=1.7, text='Правильная речь')])
+
+    monkeypatch.setattr(transcription, 'convert_to_wav', lambda src, dst: dst.write_bytes(sample.read_bytes()))
+    monkeypatch.setattr(transcription, 'load_model', lambda *args, **kw: FakeModel())
+    monkeypatch.setattr(transcription, '_prepare_vad_adapter', lambda: None)
+    monkeypatch.setattr(transcription, 'resolve_device', lambda d: 'cpu')
+    monkeypatch.setattr(transcription, 'split_wav', lambda *args: (_ for _ in ()).throw(AssertionError('Custom splitter used')))
+    result = transcription.transcribe_audio(sample, tmp_path, 'russian', lambda *args:None, 'vad', 'cpu')
+    assert result['text'] == 'Правильная речь'
+    assert result['segments'][0]['start'] == 0.2
+    assert result['mode'] == 'vad'
+
+
+def test_native_text_save_dialog(tmp_path, monkeypatch):
+    import sys,types
+    from desktop import WindowAPI
+    target = tmp_path / 'transcript.txt'
+    fake_view = types.SimpleNamespace(SAVE_DIALOG='SAVE')
+    monkeypatch.setitem(sys.modules, 'webview', fake_view)
+
+    class FakeWindow:
+        def create_file_dialog(self, *args, **kwargs):
+            assert kwargs['save_filename'] == 'record.txt'
+            return (str(target),)
+    api = WindowAPI()
+    api.window = FakeWindow()
+    assert api.save_text('record.txt', 'Привет, React!') is True
+    assert target.read_text(encoding='utf-8-sig') == 'Привет, React!'
+    assert target.read_bytes().startswith(b'\xef\xbb\xbf')

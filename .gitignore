@@ -17,3 +17,7 @@ portable/
 *.spec.log
 !frontend/dist/
 frontend/react-dist/
+
+windows/vendor/
+frontend/dist/
+frontend/node_modules/

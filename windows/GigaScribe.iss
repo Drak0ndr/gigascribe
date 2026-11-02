@@ -1,5 +1,5 @@
 ﻿#define MyAppName "GigaScribe"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.3.0"
 #define MyAppExeName "GigaScribe.exe"
 [Setup]
 AppId={{8F6DAD34-1D8E-4D24-A4E2-2B1384F13B6D}

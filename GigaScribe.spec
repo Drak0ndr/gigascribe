@@ -1,26 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller onedir Windows build; run only on Windows with Python 3.11."""
+"""PyInstaller onedir, CUDA-enabled Windows build with Mantine frontend."""
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 root = Path(SPECPATH)
 static = root / 'frontend' / 'dist'
-datas = [
-    (str(static / 'index.html'), 'frontend/dist'),
-    (str(static / 'app.js'), 'frontend/dist'),
-    (str(static / 'styles.css'), 'frontend/dist'),
-]
+if not (static / 'index.html').exists():
+    raise FileNotFoundError('Build Mantine frontend first: cd frontend && npm run build')
+datas = [(str(p), str(p.parent.relative_to(root))) for p in static.rglob('*') if p.is_file()]
 datas += collect_data_files('gigaam')
+datas += collect_data_files('pyannote.audio')
 datas += collect_data_files('imageio_ffmpeg')
-# Dynamically instantiated Hydra components and CTC/RNNT heads from checkpoints.
+# Upstream VAD uses runtime imports; PyInstaller needs PyTorch/TorchCodec native libraries.
 hiddenimports = collect_submodules('gigaam') + [
     'clr', 'pythonnet', 'webview.platforms.winforms', 'webview.platforms.edgechromium',
     'hydra', 'omegaconf', 'soundfile', 'sentencepiece', 'imageio_ffmpeg',
-    'uvicorn.protocols.http.h11_impl', 'uvicorn.lifespan.off', 'uvicorn.loops.asyncio',
+    'pyannote.audio', 'pyannote.core', 'pyannote.pipeline', 'torchcodec',
+    'huggingface_hub', 'uvicorn.protocols.http.h11_impl',
+    'uvicorn.lifespan.off', 'uvicorn.loops.asyncio',
 ]
 a = Analysis(
-    [str(root / 'desktop.py')], pathex=[str(root)], binaries=[], datas=datas,
-    hiddenimports=hiddenimports, hookspath=[], hooksconfig={},
+    [str(root / 'desktop.py')], pathex=[str(root)],
+    # Second binary is a stable unversioned executable for upstream GigaAM/torchcodec tools.
+    binaries=[(str(root / 'windows' / 'vendor' / 'ffmpeg.exe'), 'tools')],
+    datas=datas, hiddenimports=hiddenimports, hookspath=[], hooksconfig={},
     runtime_hooks=[], excludes=['PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'tkinter'],
     noarchive=False,
 )

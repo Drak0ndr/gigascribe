@@ -15,8 +15,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Dep
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.transcription import MODELS, transcribe_audio, unload_model, ffmpeg_executable
-from backend import model_store
+from backend.transcription import MODELS, transcribe_audio, unload_model, ffmpeg_executable, device_info
+from backend import model_store, vad_store
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "frontend" / "dist"
@@ -26,7 +26,7 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.2.2")
+app = FastAPI(title="GigaScribe", version="1.3.0")
 app.state.desktop_token = None
 
 
@@ -53,14 +53,14 @@ def _update(job_id: str, **changes) -> None:
             _jobs[job_id].update(changes)
 
 
-def _process(job_id: str, path: Path, temp_dir: str, model: str) -> None:
+def _process(job_id: str, path: Path, temp_dir: str, model: str, mode: str, device: str) -> None:
     try:
         _update(job_id, status="processing", phase="preparing", progress=2)
 
         def progress(phase: str, percent: int, detail: str) -> None:
             _update(job_id, phase=phase, progress=percent, detail=detail)
 
-        result = transcribe_audio(path, Path(temp_dir), model, progress)
+        result = transcribe_audio(path, Path(temp_dir), model, progress, mode=mode, device=device)
         _update(job_id, status="completed", phase="done", detail="Готово", progress=100,
                 result=result)
     except Exception as exc:
@@ -76,6 +76,7 @@ def health() -> dict:
         "status": "ok",
         "ffmpeg": ffmpeg_executable() is not None,
         "models": MODELS,
+        "device": device_info(),
         "max_file_mb": MAX_FILE_BYTES // 1024 // 1024,
     }
 
@@ -83,7 +84,35 @@ def health() -> dict:
 
 @app.get("/api/models")
 def models_status() -> dict:
-    return model_store.list_models()
+    current = model_store.list_models()
+    current['vad'] = vad_store.status()
+    return current
+
+
+class VadRequest(BaseModel):
+    token: str
+
+
+@app.post('/api/vad/download', status_code=202)
+def request_vad_download(data: VadRequest, _: None = Depends(require_local_token)) -> dict:
+    if not data.token.strip():
+        raise HTTPException(422, 'Требуется токен Hugging Face с доступом к pyannote/segmentation-3.0')
+    if vad_store.begin_download():
+        _model_executor.submit(vad_store.download, data.token.strip())
+    return {'status': 'downloading' if not vad_store.installed() else 'installed'}
+
+
+@app.delete('/api/vad')
+def remove_vad(_: None = Depends(require_local_token)) -> dict:
+    with _operation_lock:
+        with _jobs_lock:
+            if any(job.get('mode') == 'vad' and job['status'] in ('queued', 'processing') for job in _jobs.values()):
+                raise HTTPException(409, 'VAD используется в текущей расшифровке')
+        try:
+            vad_store.delete()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    return {'status': 'not_installed'}
 
 
 @app.post("/api/models/{choice}/download", status_code=202)
@@ -117,9 +146,19 @@ def remove_model(choice: str, _: None = Depends(require_local_token)) -> dict:
 
 
 @app.post("/api/jobs", status_code=202)
-async def create_job(file: UploadFile = File(...), model: str = Form(...), _: None = Depends(require_local_token)) -> dict:
+async def create_job(file: UploadFile = File(...), model: str = Form(...),
+                     mode: str = Form("standard"), device: str = Form("auto"),
+                     _: None = Depends(require_local_token)) -> dict:
     if model not in MODELS:
         raise HTTPException(422, "Выберите поддерживаемую модель")
+    if mode not in ('standard', 'vad'):
+        raise HTTPException(422, 'Некорректный режим')
+    if device not in ('auto', 'cpu', 'cuda'):
+        raise HTTPException(422, 'Некорректное устройство')
+    if mode == 'vad' and not vad_store.installed():
+        raise HTTPException(409, 'Сначала скачайте модель VAD в настройках')
+    if device == 'cuda' and not device_info()['cuda_available']:
+        raise HTTPException(409, 'CUDA недоступна. Проверьте драйвер NVIDIA и сборку PyTorch')
     filename = (file.filename or "audio").strip()
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -153,10 +192,10 @@ async def create_job(file: UploadFile = File(...), model: str = Form(...), _: No
                         del _jobs[old_id]
                 _jobs[job_id] = {
                     "id": job_id, "filename": filename, "model": model,
-                    "status": "queued", "phase": "queued", "progress": 0,
+                    "status": "queued", "mode": mode, "device": device, "phase": "queued", "progress": 0,
                     "detail": "В очереди", "error": None, "result": None,
                 }
-            _executor.submit(_process, job_id, upload_path, folder, model)
+            _executor.submit(_process, job_id, upload_path, folder, model, mode, device)
         return {"job_id": job_id}
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
