@@ -32,8 +32,8 @@ hiddenimports = collect_submodules('gigaam') + pyannote_model_imports + [
 ]
 a = Analysis(
     [str(root / 'desktop.py')], pathex=[str(root)],
-    # Second binary is a stable unversioned executable for upstream GigaAM/torchcodec tools.
-    binaries=[(str(root / 'windows' / 'vendor' / 'ffmpeg.exe'), 'tools')],
+    # imageio_ffmpeg's bundled ffmpeg is collected once by its PyInstaller hook.
+    binaries=[],
     datas=datas, hiddenimports=hiddenimports, hookspath=[], hooksconfig={},
     runtime_hooks=[], excludes=['PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'tkinter'],
     noarchive=False,

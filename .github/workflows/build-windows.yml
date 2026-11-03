@@ -48,11 +48,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Upload portable ZIP
+      - name: Validate portable folder
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'portable/GigaScribe/GigaScribe.exe')) { throw 'Portable EXE missing' }
+          if (!(Test-Path 'portable/GigaScribe/.portable')) { throw 'Portable mode marker missing' }
+          if (!(Test-Path 'portable/GigaScribe/_internal')) { throw 'Portable libraries missing' }
+          if (Test-Path 'releases/GigaScribe-Windows-Portable.zip') { throw 'Unexpected nested portable ZIP' }
+      - name: Upload portable folder (GitHub makes a single ZIP)
         uses: actions/upload-artifact@v4
         with:
           name: GigaScribe-Windows-Portable
-          path: releases/GigaScribe-Windows-Portable.zip
+          path: portable/GigaScribe/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

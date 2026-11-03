@@ -26,8 +26,7 @@ Run -Command $python -ArgsList @('-m', 'pip', 'check')
 # architecture cannot be imported from the installed pyannote distribution.
 Run -Command $python -ArgsList @('-c', 'from pyannote.audio.models.segmentation.PyanNet import PyanNet; from pyannote.audio.models.blocks.sincnet import SincNet; print("VAD checkpoint modules:", PyanNet.__module__, SincNet.__module__)')
 Run -Command $python -ArgsList @('-m', 'pytest', 'tests', '-q')
-# PyInstaller destinations are directories, so stage with canonical filename.
-Run -Command $python -ArgsList @('-c', 'import imageio_ffmpeg,shutil,pathlib; p=pathlib.Path("windows/vendor"); p.mkdir(parents=True,exist_ok=True); shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(),p/"ffmpeg.exe")')
+# Use imageio-ffmpeg's own bundled executable. No second 100-MiB copy.
 Run -Command $python -ArgsList @('-m', 'pip', 'cache', 'purge')
 Run -Command $python -ArgsList @('-c', 'import torch; assert torch.version.cuda, "CUDA wheel missing"; print("CUDA runtime:", torch.version.cuda)')
 Run -Command $python -ArgsList @('-m', 'PyInstaller', '--noconfirm', '--clean', 'GigaScribe.spec')
@@ -54,10 +53,13 @@ $portable = Join-Path $root 'portable\GigaScribe'
 if (Test-Path $portable) { Remove-Item -Recurse -Force $portable }
 New-Item -ItemType Directory -Path $portable -Force | Out-Null
 Copy-Item -Path (Join-Path $root 'dist\GigaScribe\*') -Destination $portable -Recurse -Force
-New-Item -ItemType File -Path (Join-Path $portable '.portable') -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $portable '.portable') -Value 'portable' -Encoding ascii
+# GitHub upload-artifact creates ONE download ZIP from the portable directory.
+# Do not create a separate inner ZIP. .portable must be included as a hidden file.
 $releases = Join-Path $root 'releases'
 New-Item -ItemType Directory -Path $releases -Force | Out-Null
-Compress-Archive -Path $portable -DestinationPath (Join-Path $releases 'GigaScribe-Windows-Portable.zip') -Force
+if (-not (Test-Path (Join-Path $portable 'GigaScribe.exe'))) { throw 'Portable EXE missing' }
+if (-not (Test-Path (Join-Path $portable '.portable'))) { throw 'Portable storage marker missing' }
 $iscc = $null
 $cmd = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
 if ($cmd) { $iscc = $cmd.Source }
@@ -71,3 +73,4 @@ if (-not $iscc) { throw 'Inno Setup 6 is missing' }
 Run -Command $iscc -ArgsList @('windows\GigaScribe.iss')
 if (-not (Test-Path (Join-Path $releases 'GigaScribe-Setup-Windows-x64.exe'))) { throw 'Setup EXE missing' }
 Get-ChildItem $releases
+Write-Host ('Portable ready in: {0}' -f $portable)

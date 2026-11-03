@@ -22,13 +22,25 @@ class WindowAPI:
     def __init__(self):
         self.window = None
         self.is_maximized = False
+        self._restore_bounds = None
 
     def minimize(self):
         if self.window:
             self.window.minimize()
 
     def toggle_maximize(self):
-        if self.window:
+        if not self.window:
+            return
+        import sys
+        if sys.platform == 'win32':
+            # WinForms's maximize() on a frameless form may hide the taskbar.
+            # Move this window to its own monitor's work area using native pixels.
+            from backend.windows_workarea import toggle_work_area
+            native = self.window.native
+            hwnd = int(native.Handle.ToInt64())
+            self._restore_bounds = toggle_work_area(hwnd, self._restore_bounds)
+            self.is_maximized = self._restore_bounds is not None
+        else:
             if self.is_maximized:
                 self.window.restore()
             else:
@@ -65,9 +77,8 @@ def main() -> None:
     from backend.main import app
     from pathlib import Path
     import sys
-    if getattr(sys, 'frozen', False):
-        tools = Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent)) / 'tools'
-        os.environ['PATH'] = str(tools) + os.pathsep + os.environ.get('PATH', '')
+    # FFmpeg is shipped once by imageio_ffmpeg and accessed using its
+    # absolute path in the audio conversion layer. Do not add a second copy.
     webview.settings['ALLOW_DOWNLOADS'] = True
 
     app.state.desktop_token = secrets.token_urlsafe(32)

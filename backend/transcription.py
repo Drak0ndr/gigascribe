@@ -11,7 +11,6 @@ from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired, run
 from typing import Callable
 
-import numpy as np
 
 MODELS = {
     "russian": "v3_e2e_rnnt",
@@ -35,6 +34,7 @@ def _prepare_normalized_wav(self, wav_file: str):
     Reading the PCM frames in-process avoids that redundant, fragile subprocess.
     """
     import torch
+    import numpy as np
 
     with wave.open(str(wav_file), "rb") as wav:
         if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, SAMPLE_RATE):
@@ -180,6 +180,7 @@ def _quiet_cut(wav: wave.Wave_read, start_frame: int, max_end: int) -> int:
     If there is no meaningful pause, use the maximum boundary. No overlapping
     segments are created to avoid repeated words in the result.
     """
+    import numpy as np
     sr = wav.getframerate()
     search_start = max(start_frame + sr, max_end - int(2.5 * sr))
     length = max_end - search_start
@@ -248,6 +249,7 @@ def _normalized_audio_tensor(path: str):
     The input has already been converted to mono 16k PCM by GigaScribe.
     """
     import torch
+    import numpy as np
     with wave.open(str(path), "rb") as w:
         if (w.getnchannels(), w.getsampwidth(), w.getframerate()) != (1, 2, SAMPLE_RATE):
             raise ValueError("VAD ожидает PCM16 16 kHz mono")

@@ -1,4 +1,4 @@
-# GigaScribe Desktop v1.3.3
+# GigaScribe Desktop v1.3.4
 
 Приложение для локальной расшифровки аудио на GigaAM от Сбера. Новая версия: React + **Mantine**, окно без стандартного Windows titlebar, выбор вычислительного устройства, два режима обработки длинных записей, отдельный опциональный VAD, системный диалог сохранения TXT/SRT.
 
@@ -9,8 +9,8 @@
 3. Откройте **Actions → Build GigaScribe for Windows → Run workflow**.
 4. После зелёной отметки раскройте **Artifacts**. Теперь публикуются **ДВА независимых артефакта**:
    - `GigaScribe-Windows-Installer` → архив с `GigaScribe-Setup-Windows-x64.exe`.
-   - `GigaScribe-Windows-Portable` → архив с `GigaScribe-Windows-Portable.zip`.
-5. Для установленной версии запустите Setup.exe. Для переносной распакуйте внутренний ZIP и запустите `GigaScribe.exe` из папки `GigaScribe` (не выносите EXE отдельно из папки с библиотеками).
+   - `GigaScribe-Windows-Portable` → ZIP с **сразу готовыми** `GigaScribe.exe`, `_internal` и `.portable` (без вложенного ZIP).
+5. Для установленной версии распакуйте артефакт Installer и запустите Setup.exe. Для переносной распакуйте артефакт Portable **один раз** и запустите `GigaScribe.exe` рядом с `_internal` (не выносите EXE отдельно). В Portable маркер `.portable` обязателен для сохранения моделей рядом с программой.
 
 **Важно:** в этом архиве исходники, не готовый Windows EXE. В текущей Linux-среде Windows-сборка/работа с реальными весами не проверены. CUDA-сборка содержит большой PyTorch и может производить крупные загрузки/артефакты. GitHub Actions должен собрать React интерфейс командой `npm run build` **до** PyInstaller.
 
@@ -113,3 +113,24 @@ and portable distribution` в GitHub Actions: `Portable uncompressed size`
 измерениям: например, создать CPU-only lite-дистрибутив (без CUDA) или
 перевести отдельные модели на ONNX Runtime. Это отдельная задача,
 которая требует повторных тестов распознавания.
+
+
+## 1.3.4 — startup / portable / taskbar / bundle cleanup
+
+- GitHub Actions now uploads the **portable directory directly**, not a pre-packed
+  ZIP. GitHub produces the only ZIP that users download. The `.portable` hidden
+  marker is explicitly included (`include-hidden-files: true`) so portable model
+  storage continues to work correctly.
+- Removed the second, duplicate FFmpeg (`tools/ffmpeg.exe`). The existing
+  `imageio_ffmpeg` binary remains; audio conversion uses its absolute path.
+- CUDA detection is initiated asynchronously on the first health request;
+  PyTorch no longer blocks the first server health response. NumPy is imported
+  on demand for audio operations. Actual startup-time improvement depends on
+  disk speed/antivirus/Windows machine; this is not a benchmark claim.
+- Borderless window maximize uses the current monitor's **work area** (excluding
+  Windows taskbar) rather than treating maximize as fullscreen. Handles a
+  taskbar on a secondary monitor. Windows runtime still needs real-world QA.
+- Left CUDA and cuDNN files intact; do NOT delete them manually. Some
+  similarly named DLLs are functional alternatives, not confirmed duplicates.
+- Standard silence-aware segmentation remains the default because it produced
+  better results in your tests. VAD remains optional.

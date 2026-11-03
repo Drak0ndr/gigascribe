@@ -26,8 +26,30 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.3.0")
+app = FastAPI(title="GigaScribe", version="1.3.4")
 app.state.desktop_token = None
+
+# Importing torch + probing CUDA is expensive on a packaged Windows install.
+# Start it only after /api/health is first requested, without blocking the UI.
+_device_probe_lock = threading.Lock()
+_device_probe_started = False
+_device_probe_result: dict | None = None
+
+
+def _run_device_probe() -> None:
+    global _device_probe_result
+    result = device_info()
+    with _device_probe_lock:
+        _device_probe_result = result
+
+
+def _background_device_status() -> dict | None:
+    global _device_probe_started
+    with _device_probe_lock:
+        if not _device_probe_started:
+            _device_probe_started = True
+            threading.Thread(target=_run_device_probe, name='gigascribe-cuda-probe', daemon=True).start()
+        return _device_probe_result
 
 
 def require_local_token(request: Request) -> None:
@@ -76,7 +98,7 @@ def health() -> dict:
         "status": "ok",
         "ffmpeg": ffmpeg_executable() is not None,
         "models": MODELS,
-        "device": device_info(),
+        "device": _background_device_status(),
         "max_file_mb": MAX_FILE_BYTES // 1024 // 1024,
     }
 

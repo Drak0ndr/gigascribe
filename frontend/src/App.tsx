@@ -154,7 +154,7 @@ function App() {
 
   return <div className="app-root">
     {isDesktop&&<div className="windowbar">
-      <div className="windowbrand pywebview-drag-region"><IconMicrophone size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3.1</span></div>
+      <div className="windowbrand pywebview-drag-region"><IconMicrophone size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3.4</span></div>
       <div className="windowactions">
         <button aria-label="Свернуть" onClick={()=>void window.pywebview?.api?.minimize()}><IconMinus size={16}/></button>
         <button aria-label="Развернуть" onClick={()=>void window.pywebview?.api?.toggle_maximize()}><IconSquare size={13}/></button>
@@ -233,7 +233,7 @@ function App() {
           <Card className="panel" withBorder radius="lg" padding="lg"><Group gap="sm" mb="lg"><IconCpu size={22}/><Text fw={600}>Ускорение NVIDIA</Text></Group><Stack gap="sm"><Group justify="space-between"><Text size="sm" c="dimmed">CUDA</Text><Badge variant="light" color={deviceInfo?.cuda_available?'green':'red'}>{deviceInfo?.cuda_available?'Доступна':'Недоступна'}</Badge></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Устройство</Text><Text size="sm">{deviceInfo?.gpu_name||'CPU'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Версия PyTorch</Text><Text size="sm">{deviceInfo?.torch_version||'—'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">CUDA runtime</Text><Text size="sm">{deviceInfo?.cuda_runtime||'—'}</Text></Group></Stack>{deviceInfo?.reason&&<Alert mt="lg" color="yellow" icon={<IconInfoCircle size={17}/>}>{deviceInfo.reason}</Alert>}</Card>
           <Card className="panel" withBorder radius="lg" padding="lg"><Text fw={600}>Файлы моделей</Text><Text size="sm" c="dimmed" mt={8} style={{wordBreak:'break-all'}}>{models?.path||'—'}</Text><Text size="xs" c="dimmed" mt="sm">Все веса остаются на диске при обновлении установленной версии приложения.</Text></Card>
         </Stack>}
-        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3.1 · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
+        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3.4 · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
       </div></ScrollArea></main>
     </div>
     <Modal centered title="Удалить модель?" opened={pendingDelete!==null} onClose={()=>setPendingDelete(null)}>
