@@ -12,7 +12,18 @@ datas += collect_data_files('gigaam')
 datas += collect_data_files('pyannote.audio')
 datas += collect_data_files('imageio_ffmpeg')
 # Upstream VAD uses runtime imports; PyInstaller needs PyTorch/TorchCodec native libraries.
-hiddenimports = collect_submodules('gigaam') + [
+# Pyannote checkpoint contains a dynamically resolved architecture path such as
+# `pyannote.audio.models.segmentation.PyanNet`.  A normal import of pyannote.audio
+# does not pull these modules into PyInstaller's dependency graph.
+# Include only model architecture and support blocks rather than collecting the
+# entire pyannote.audio package, to avoid unnecessarily bloating the archive.
+pyannote_model_imports = (
+    collect_submodules('pyannote.audio.models.segmentation')
+    + collect_submodules('pyannote.audio.models.blocks')
+)
+if 'pyannote.audio.models.segmentation.PyanNet' not in pyannote_model_imports:
+    raise RuntimeError('Pyannote PyanNet architecture is missing from build environment')
+hiddenimports = collect_submodules('gigaam') + pyannote_model_imports + [
     'clr', 'pythonnet', 'webview.platforms.winforms', 'webview.platforms.edgechromium',
     'hydra', 'omegaconf', 'soundfile', 'sentencepiece', 'imageio_ffmpeg',
     'pyannote.audio', 'pyannote.core', 'pyannote.pipeline', 'torchcodec',

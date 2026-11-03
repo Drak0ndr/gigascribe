@@ -123,6 +123,12 @@ def self_check() -> int:
         import torch
         import gigaam
         import pyannote.audio
+        # The checkpoint dynamically imports its architecture when loaded.
+        # Check the *packaged* executable, not just top-level pyannote.audio.
+        from pyannote.audio.models.segmentation.PyanNet import PyanNet
+        from pyannote.audio.models.blocks.sincnet import SincNet
+        assert issubclass(PyanNet, pyannote.audio.Model), 'VAD architecture is unavailable'
+        assert SincNet is not None, 'VAD support block is unavailable'
         import torchcodec
         from backend import vad_store
         from backend.main import DIST

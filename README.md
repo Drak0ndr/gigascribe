@@ -1,4 +1,4 @@
-# GigaScribe Desktop v1.3.0
+# GigaScribe Desktop v1.3.3
 
 Приложение для локальной расшифровки аудио на GigaAM от Сбера. Новая версия: React + **Mantine**, окно без стандартного Windows titlebar, выбор вычислительного устройства, два режима обработки длинных записей, отдельный опциональный VAD, системный диалог сохранения TXT/SRT.
 
@@ -62,3 +62,54 @@ py -3.11 -m venv .venv
 - GigaAM — внешний проект, модели и их лицензии определяются владельцем. Код GigaScribe не включает веса в установщик.
 - Реальный инференс на RTX 5060, совместимость `pyannote.audio`/`torchcodec` с Windows PyInstaller и поведение рамки на конкретной машине требуют smoke-test **на Windows**, а не только pytest на Linux. PyInstaller `--self-check` добавлен в пайплайн до загрузки артефактов, но без весов.
 - Установка нового установщика поверх старого не удаляет `models` в `%LOCALAPPDATA%`.
+
+
+## 1.3.1 — TypeScript frontend hotfix
+
+Fixes Mantine FileButton render prop, fetch headers typings and an unsupported Tabler icon. Build the updated UI using `cd frontend && npm install && npm run build`, or push the changes and rerun GitHub Actions.
+
+
+## 1.3.2 — Windows test encoding fix
+
+- All `Path.read_text()` calls in pytest regression tests explicitly specify `encoding="utf-8"` to avoid Windows ANSI codepages (such as cp1252).
+- `windows/build-windows.ps1` sets `PYTHONUTF8=1` to avoid implicit Windows locale decoding in Python subprocesses.
+- This change addresses a `UnicodeDecodeError` from `test_frontend_native_export_and_mantine_sources`; no model files need to be redownloaded.
+
+
+## 1.3.3 — VAD PyInstaller dynamic import fix / bundle size report
+
+Причина ошибки `No module named 'pyannote.audio.models.segmentation'` в
+Windows portable/installer: контрольная точка `pyannote/segmentation-3.0`
+восстанавливает класс `PyanNet` динамически, но старая PyInstaller-сборка
+включала только базовые модули `pyannote.audio`.
+
+Изменено:
+
+- `GigaScribe.spec`: явно собраны модули сегментации и их базовые блоки
+  (`pyannote.audio.models.segmentation`, `pyannote.audio.models.blocks`).
+- `windows/build-windows.ps1`: проверка импорта архитектуры VAD ещё до
+  тяжёлой PyInstaller-сборки; после сборки печатаются суммарный несжатый
+  размер portable и 20 самых больших файлов с размером каждого.
+- `desktop.py --self-check`: проверяет, что **собранный EXE** может импортировать
+  `PyanNet` и `SincNet`, а не только корневой пакет `pyannote.audio`.
+- Обновлены тестовые подмены и регрессионная проверка сборочных файлов.
+
+Это устраняет известный пропущенный модуль при упаковке. Но **не гарантирует**
+успешную загрузку реальных VAD-весов/декодирование на конкретном Windows ПК:
+на Linux не проверена сборка EXE и нет доступа к весам `pyannote/segmentation-3.0`
+без токена. Для начала повторите распознавание с уже установленной VAD;
+если следующая ошибка иная, приложите её полный текст.
+
+### Почему portable большой и как уменьшить
+
+В полном CUDA-дистрибутиве PyTorch, CUDA/cuDNN и их DLL занимают значительно
+больше места, чем оболочка и интерфейс. 3 ГБ распакованного portable возможны
+даже без скачанных весов GigaAM. В этой версии не удаляются вычислительные
+библиотеки (это могло бы сломать RTX 5060 и VAD).
+
+Чтобы понять конкретный состав, смотрите конец шага `Build Windows installer
+and portable distribution` в GitHub Actions: `Portable uncompressed size`
+и `Largest bundled files`. Затем можно отдельно оптимизировать сборку по
+измерениям: например, создать CPU-only lite-дистрибутив (без CUDA) или
+перевести отдельные модели на ONNX Runtime. Это отдельная задача,
+которая требует повторных тестов распознавания.

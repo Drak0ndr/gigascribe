@@ -297,9 +297,38 @@ def test_desktop_self_check_without_models(monkeypatch, tmp_path):
     monkeypatch.setattr(backend_main, 'DIST', frontend)
     monkeypatch.setattr(torch.version, 'cuda', '12.8')
     monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda: None))
-    monkeypatch.setitem(sys.modules, 'pyannote', types.ModuleType('pyannote'))
-    monkeypatch.setitem(sys.modules, 'pyannote.audio', types.ModuleType('pyannote.audio'))
-    monkeypatch.setitem(sys.modules, 'torchcodec', types.ModuleType('torchcodec'))
+    # Simulate the dynamically imported pyannote checkpoint architecture.
+    # This is the exact import that was absent from the v1.3.2 frozen EXE.
+    pyannote = types.ModuleType('pyannote')
+    pyannote.__path__ = []
+    audio = types.ModuleType('pyannote.audio')
+    audio.__path__ = []
+    models = types.ModuleType('pyannote.audio.models')
+    models.__path__ = []
+    segmentation = types.ModuleType('pyannote.audio.models.segmentation')
+    segmentation.__path__ = []
+    blocks = types.ModuleType('pyannote.audio.models.blocks')
+    blocks.__path__ = []
+    pynet_module = types.ModuleType('pyannote.audio.models.segmentation.PyanNet')
+    sincnet_module = types.ModuleType('pyannote.audio.models.blocks.sincnet')
+    class FakePyannoteModel: pass
+    class FakePyanNet(FakePyannoteModel): pass
+    class FakeSincNet: pass
+    audio.Model = FakePyannoteModel
+    pynet_module.PyanNet = FakePyanNet
+    sincnet_module.SincNet = FakeSincNet
+    pyannote.audio = audio
+    for name, mod in {
+        'pyannote': pyannote,
+        'pyannote.audio': audio,
+        'pyannote.audio.models': models,
+        'pyannote.audio.models.segmentation': segmentation,
+        'pyannote.audio.models.blocks': blocks,
+        'pyannote.audio.models.segmentation.PyanNet': pynet_module,
+        'pyannote.audio.models.blocks.sincnet': sincnet_module,
+        'torchcodec': types.ModuleType('torchcodec'),
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
     monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
     assert self_check() == 0, (tmp_path / 'gigascribe-desktop-self-check.log').read_text(encoding='utf-8')
     assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text(encoding='utf-8')

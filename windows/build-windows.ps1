@@ -22,6 +22,9 @@ Run -Command $python -ArgsList @('-m', 'pip', 'install', '--upgrade', 'pip', 'se
 Run -Command $python -ArgsList @('-m', 'pip', 'install', 'torch==2.10.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cu128')
 Run -Command $python -ArgsList @('-m', 'pip', 'install', '-r', 'requirements-desktop.txt', 'pyinstaller', 'pytest', 'httpx', 'gigaam[longform] @ git+https://github.com/salute-developers/GigaAM.git')
 Run -Command $python -ArgsList @('-m', 'pip', 'check')
+# Fail *before* the expensive PyInstaller build if the expected checkpoint
+# architecture cannot be imported from the installed pyannote distribution.
+Run -Command $python -ArgsList @('-c', 'from pyannote.audio.models.segmentation.PyanNet import PyanNet; from pyannote.audio.models.blocks.sincnet import SincNet; print("VAD checkpoint modules:", PyanNet.__module__, SincNet.__module__)')
 Run -Command $python -ArgsList @('-m', 'pytest', 'tests', '-q')
 # PyInstaller destinations are directories, so stage with canonical filename.
 Run -Command $python -ArgsList @('-c', 'import imageio_ffmpeg,shutil,pathlib; p=pathlib.Path("windows/vendor"); p.mkdir(parents=True,exist_ok=True); shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(),p/"ffmpeg.exe")')
@@ -30,6 +33,16 @@ Run -Command $python -ArgsList @('-c', 'import torch; assert torch.version.cuda,
 Run -Command $python -ArgsList @('-m', 'PyInstaller', '--noconfirm', '--clean', 'GigaScribe.spec')
 $exe = Join-Path $root 'dist\GigaScribe\GigaScribe.exe'
 if (-not (Test-Path $exe)) { throw 'PyInstaller did not create GigaScribe.exe' }
+# Report the real disk consumers rather than guessing which CUDA DLLs are safe
+# to remove.  This does not change runtime files.
+$distRoot = Join-Path $root 'dist\GigaScribe'
+$files = @(Get-ChildItem -LiteralPath $distRoot -Recurse -File)
+$bytes = ($files | Measure-Object -Property Length -Sum).Sum
+Write-Host ('Portable uncompressed size: {0:N2} GiB' -f ($bytes / 1GB))
+Write-Host 'Largest bundled files:'
+$files | Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object {
+    Write-Host ('  {0,8:N1} MiB  {1}' -f ($_.Length / 1MB), $_.FullName.Substring($distRoot.Length + 1))
+}
 # Model weights intentionally excluded. The self-check imports bundled VAD dependencies.
 & $exe --self-check
 if ($LASTEXITCODE -ne 0) {

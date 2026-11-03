@@ -42,3 +42,19 @@ def test_frontend_native_export_and_mantine_sources():
     assert 'pywebview.api.save_text' in source
     assert 'webview.SAVE_DIALOG' in desktop
     assert 'frameless=True' in desktop
+
+
+def test_vad_checkpoint_architecture_is_bundled_and_checked():
+    """Prevent successful EXE packaging with missing dynamically loaded VAD modules."""
+    spec = (ROOT / 'GigaScribe.spec').read_text(encoding='utf-8')
+    desktop = (ROOT / 'desktop.py').read_text(encoding='utf-8')
+    script = (ROOT / 'windows/build-windows.ps1').read_text(encoding='utf-8')
+    assert "collect_submodules('pyannote.audio.models.segmentation')" in spec
+    assert "collect_submodules('pyannote.audio.models.blocks')" in spec
+    assert 'pyannote.audio.models.segmentation.PyanNet' in spec
+    assert 'from pyannote.audio.models.segmentation.PyanNet import PyanNet' in desktop
+    assert 'from pyannote.audio.models.blocks.sincnet import SincNet' in desktop
+    assert 'from pyannote.audio.models.segmentation.PyanNet import PyanNet' in script
+    assert script.index('from pyannote.audio.models.segmentation.PyanNet') < script.index("'PyInstaller'")
+    assert '& $exe --self-check' in script
+    assert 'Largest bundled files:' in script
