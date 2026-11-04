@@ -26,30 +26,8 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.3.4")
+app = FastAPI(title="GigaScribe", version="1.3.5")
 app.state.desktop_token = None
-
-# Importing torch + probing CUDA is expensive on a packaged Windows install.
-# Start it only after /api/health is first requested, without blocking the UI.
-_device_probe_lock = threading.Lock()
-_device_probe_started = False
-_device_probe_result: dict | None = None
-
-
-def _run_device_probe() -> None:
-    global _device_probe_result
-    result = device_info()
-    with _device_probe_lock:
-        _device_probe_result = result
-
-
-def _background_device_status() -> dict | None:
-    global _device_probe_started
-    with _device_probe_lock:
-        if not _device_probe_started:
-            _device_probe_started = True
-            threading.Thread(target=_run_device_probe, name='gigascribe-cuda-probe', daemon=True).start()
-        return _device_probe_result
 
 
 def require_local_token(request: Request) -> None:
@@ -98,7 +76,7 @@ def health() -> dict:
         "status": "ok",
         "ffmpeg": ffmpeg_executable() is not None,
         "models": MODELS,
-        "device": _background_device_status(),
+        "device": device_info(),
         "max_file_mb": MAX_FILE_BYTES // 1024 // 1024,
     }
 
@@ -179,8 +157,8 @@ async def create_job(file: UploadFile = File(...), model: str = Form(...),
         raise HTTPException(422, 'Некорректное устройство')
     if mode == 'vad' and not vad_store.installed():
         raise HTTPException(409, 'Сначала скачайте модель VAD в настройках')
-    if device == 'cuda' and not device_info()['cuda_available']:
-        raise HTTPException(409, 'CUDA недоступна. Проверьте драйвер NVIDIA и сборку PyTorch')
+    if device == 'cuda':
+        raise HTTPException(409, 'Эта версия GigaScribe работает только на CPU')
     filename = (file.filename or "audio").strip()
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:

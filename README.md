@@ -1,136 +1,73 @@
-# GigaScribe Desktop v1.3.4
+# GigaScribe Desktop 1.3.5 Lite (Windows, CPU)
 
-Приложение для локальной расшифровки аудио на GigaAM от Сбера. Новая версия: React + **Mantine**, окно без стандартного Windows titlebar, выбор вычислительного устройства, два режима обработки длинных записей, отдельный опциональный VAD, системный диалог сохранения TXT/SRT.
+Локальная расшифровка аудио с GigaAM от Сбера. Версия 1.3.5 — откат тяжёлой CUDA-сборки, исправление поиска сохранённых моделей и четыре модели на выбор. Интерфейс остаётся на React + Mantine. **Архив содержит исходники и Windows-пайплайн, а не собранный EXE.**
 
-## Как получить EXE через GitHub Actions
+## Что изменилось относительно 1.3.4
 
-1. Замените файлы в репозитории содержимым ZIP. В том числе `.github/workflows/build-windows.yml`.
-2. Сделайте commit и push в GitHub.
-3. Откройте **Actions → Build GigaScribe for Windows → Run workflow**.
-4. После зелёной отметки раскройте **Artifacts**. Теперь публикуются **ДВА независимых артефакта**:
-   - `GigaScribe-Windows-Installer` → архив с `GigaScribe-Setup-Windows-x64.exe`.
-   - `GigaScribe-Windows-Portable` → ZIP с **сразу готовыми** `GigaScribe.exe`, `_internal` и `.portable` (без вложенного ZIP).
-5. Для установленной версии распакуйте артефакт Installer и запустите Setup.exe. Для переносной распакуйте артефакт Portable **один раз** и запустите `GigaScribe.exe` рядом с `_internal` (не выносите EXE отдельно). В Portable маркер `.portable` обязателен для сохранения моделей рядом с программой.
-
-**Важно:** в этом архиве исходники, не готовый Windows EXE. В текущей Linux-среде Windows-сборка/работа с реальными весами не проверены. CUDA-сборка содержит большой PyTorch и может производить крупные загрузки/артефакты. GitHub Actions должен собрать React интерфейс командой `npm run build` **до** PyInstaller.
+- **CPU-only PyTorch 2.10.0**. CUDA и DLL NVIDIA/cuDNN больше не входят в сборку. Это должно заметно уменьшить размер portable, однако фактический размер нужно проверить по логу нового Actions. Расшифровка станет медленнее, особенно на `multilingual_large_ctc`.
+- Убран фоновый запуск проверки CUDA из `/api/health`: окно больше не стартует тяжёлую диагностику GPU после появления интерфейса.
+- **Исправлен поиск моделей между portable и установленной версией.** Portable предпочитает `models` рядом с EXE, но видит и ранее установленные веса из `%LOCALAPPDATA%\GigaScribe\models`. Установленная версия также ищет уже скачанные модели рядом с EXE; дополнительно поддерживается прежний плоский кэш `~/.cache/gigaam`. **Никаких копий больших весов при обнаружении не создаётся.**
+- Поддерживаются модели, скачанные до появления файла `.ready.json`: если файлы есть и не имеют незавершённой загрузки `.part`, они видны в списке. **Перед инференсом GigaAM самостоятельно сверяет MD5 чекпойнта**. Если файл повреждён, его нужно удалить и загрузить заново. Существующий корректный `.ready.json` продолжает проверяться по размеру файлов.
+- При ошибке связи интерфейс сообщает о проблеме с сервером вместо ложного статуса «Не установлена».
+- Дополнительно появились `v3_e2e_ctc` и `multilingual_large_ctc`; каждая модель скачивается отдельно и может быть удалена из интерфейса.
+- Оставлены улучшенная стандартная сегментация длинных файлов, необязательный VAD, нативный экспорт TXT/SRT, окно без обычного Windows titlebar и разворачивание по рабочей области без перекрытия панели задач.
+- Артефакты GitHub Actions по-прежнему раздельные: один установщик и один portable ZIP (без ZIP внутри ZIP).
 
 ## Модели
 
-Во вкладке **Модели**:
-- `GigaAM v3_e2e_rnnt` — русский с пунктуацией;
-- `GigaAM multilingual_ctc` — мультиязычное распознавание;
-- **VAD `pyannote/segmentation-3.0`** — отдельно, *необязательный* компонент для длинных файлов.
+| Выбор в приложении | GigaAM ID | Особенности |
+|---|---|---|
+| Русская RNNT | `v3_e2e_rnnt` | Русская речь, пунктуация, нормализация |
+| Русская CTC | `v3_e2e_ctc` | Быстрая русская альтернатива с пунктуацией |
+| Мультиязычная CTC | `multilingual_ctc` | RU/EN/KK/KY/UZ; базовая 220M |
+| Мультиязычная Large CTC | `multilingual_large_ctc` | RU/EN/KK/KY/UZ; увеличенная 600M |
 
-Ни одна модель не скачивается автоматически. Система хранит веса на диске при перезапуске. Каждую можно удалить отдельно.
+Контрольные суммы весов проверяются против значений из официального GigaAM (https://github.com/salute-developers/GigaAM/blob/main/gigaam/__init__.py). Модели не включаются в установщик и не скачиваются автоматически. Важный нюанс: `v3_e2e_ctc` тоже требует собственный файл токенизатора.
 
-В установленной Windows-версии: `%LOCALAPPDATA%\GigaScribe\models`. В Portable: `models` рядом с `GigaScribe.exe`. При запуске исходников: `./models`. Для VAD используются файлы `models/vad/weights`.
+## Сборка установщика на GitHub
 
-**VAD:** получите read-токен на https://huggingface.co/settings/tokens и примите условия на https://huggingface.co/pyannote/segmentation-3.0 . Введите токен в поле приложения и нажмите «Скачать VAD». Токен используется только для фонового скачивания и **не сохраняется** программой. Веса VAD после загрузки работают локально. VAD определяет границы речи, но не гарантирует исправления всех ошибок модели распознавания.
+1. Распакуйте файлы проекта в корень репозитория с заменой (включая скрытую `.github/workflows/build-windows.yml`).
+2. Commit + push в GitHub.
+3. **Actions → Build GigaScribe for Windows → Run workflow**.
+4. После успешной сборки скачайте нужный артефакт:
+   - `GigaScribe-Windows-Installer` — установщик `GigaScribe-Setup-Windows-x64.exe`.
+   - `GigaScribe-Windows-Portable` — GitHub ZIP с `GigaScribe.exe`, `_internal` и `.portable` **на верхнем уровне**, без повторного архивирования.
 
-Режимы распознавания: стандартное разбиение на фрагменты по паузам либо официальный **`model.transcribe_longform()`** с VAD. Во втором режиме выполняется пакетная расшифровка с ограниченным batch size 2; индикатор может некоторое время оставаться на одном значении во время вычисления — API GigaAM не предоставляет callback по каждому батчу.
+Внимание: после распаковки portable не переносите один EXE отдельно от `_internal`. Не удаляйте `.portable`, если хотите хранить новые модели рядом с EXE. Если ранее использовали установленную версию, portable обнаружит модели в её старой папке. На экране каждой установленной модели показывается фактический путь; удаление удаляет файлы **именно из указанного расположения**.
 
-## Почему RTX 5060 раньше не использовалась
+### Где находятся модели
 
-Версия 1.2.2 в build-windows.ps1 явно ставила PyTorch из `https://download.pytorch.org/whl/cpu`. На GPU ничего не запускалось. В 1.3.0 используется **PyTorch 2.10.0 + CUDA 12.8** из официального индекса. В настройках показаны CUDA, GPU и версия PyTorch. В рабочей области можно выбрать `Автоматически`, `NVIDIA CUDA` или `CPU`. При явно выбранной NVIDIA без доступной CUDA приложение выдаёт ошибку, а не притворяется, что использует GPU.
+- Установленная программа: `%LOCALAPPDATA%\GigaScribe\models`.
+- Portable: `models` рядом с `GigaScribe.exe` (но поиск включает ранее установленные модели).
+- Запуск из исходников: `./models`.
+- Альтернативный путь: переменная окружения `GIGASCRIBE_MODELS_DIR` (при явном задании поиск только по этому пути).
 
-Для CUDA требуется совместимый драйвер NVIDIA. Если видеокарта определяется, но ядра запускаются с ошибкой совместимости, проверьте актуальность драйвера и сборку PyTorch. Наличие CUDA *не означает* нулевую загрузку CPU: декодирование/конвертация и часть работы по-прежнему CPU.
+Установка новой версии поверх прежней не должна удалять старые модели. Однако перед крупным обновлением рекомендуется сохранить резервную копию `%LOCALAPPDATA%\GigaScribe\models`.
 
-## Как локально запустить (Windows, разработка)
+## Локальный запуск из исходников на Windows
 
-Установите Python 3.11, Git, Node.js 22, драйвер NVIDIA (если есть RTX). В PowerShell из корня проекта:
+Нужны Python **3.11**, Git, Node.js 22. Из PowerShell в корне проекта:
 
 ```powershell
 cd frontend
-npm install
+npm install --no-audit --no-fund
 npm run build
 cd ..
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
-.\.venv\Scripts\python.exe -m pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python.exe -m pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu
 .\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt "gigaam[longform] @ git+https://github.com/salute-developers/GigaAM.git"
 .\.venv\Scripts\python.exe desktop.py
 ```
 
-Затем достаточно дважды нажимать `start-desktop.bat`. Для проверки API/тестов: `python -m pytest tests -q` (в выбранном Python окружении).
+После установки можно запускать `start-desktop.bat`. **Важно:** если `.venv` существовал от CUDA-версии 1.3.4, удалите старую `.venv` перед командами выше, иначе pip может оставить GPU-библиотеки. Скрипт `windows/build-windows.ps1` при сборке установщика автоматически создаёт новое окружение `.venv-build` и проверяет, что оно CPU-only.
 
-Чтобы вручную собрать установщик на Windows, установите Inno Setup 6 и PyInstaller и используйте `powershell -ExecutionPolicy Bypass -File windows\build-windows.ps1`. Сборочный скрипт создаёт своё окружение `.venv-build`.
+## VAD
 
-## Технические детали
+VAD (`pyannote/segmentation-3.0`) по-прежнему необязателен. Для его первоначальной загрузки примите условия модели на Hugging Face и используйте read-токен. Веса хранятся отдельно, работа после скачивания локальная. Стандартная сегментация остаётся режимом по умолчанию: на некоторых записях она может дать текст качественнее, чем VAD. Пакет `gigaam[longform]` и его зависимости остаются в сборке — это влияет на размер.
 
-- Python FastAPI слушает только loopback-интерфейс, а изменения из десктопного окна требуют одноразовый X-GigaScribe-Token.
-- При установленной версии на Windows TXT/SRT сохраняется через системный диалог `pywebview.SAVE_DIALOG`, с UTF-8 BOM (для Блокнота). В браузерной dev-версии — обычная загрузка через Blob.
-- GigaAM — внешний проект, модели и их лицензии определяются владельцем. Код GigaScribe не включает веса в установщик.
-- Реальный инференс на RTX 5060, совместимость `pyannote.audio`/`torchcodec` с Windows PyInstaller и поведение рамки на конкретной машине требуют smoke-test **на Windows**, а не только pytest на Linux. PyInstaller `--self-check` добавлен в пайплайн до загрузки артефактов, но без весов.
-- Установка нового установщика поверх старого не удаляет `models` в `%LOCALAPPDATA%`.
+## Проверки и ограничения
 
-
-## 1.3.1 — TypeScript frontend hotfix
-
-Fixes Mantine FileButton render prop, fetch headers typings and an unsupported Tabler icon. Build the updated UI using `cd frontend && npm install && npm run build`, or push the changes and rerun GitHub Actions.
-
-
-## 1.3.2 — Windows test encoding fix
-
-- All `Path.read_text()` calls in pytest regression tests explicitly specify `encoding="utf-8"` to avoid Windows ANSI codepages (such as cp1252).
-- `windows/build-windows.ps1` sets `PYTHONUTF8=1` to avoid implicit Windows locale decoding in Python subprocesses.
-- This change addresses a `UnicodeDecodeError` from `test_frontend_native_export_and_mantine_sources`; no model files need to be redownloaded.
-
-
-## 1.3.3 — VAD PyInstaller dynamic import fix / bundle size report
-
-Причина ошибки `No module named 'pyannote.audio.models.segmentation'` в
-Windows portable/installer: контрольная точка `pyannote/segmentation-3.0`
-восстанавливает класс `PyanNet` динамически, но старая PyInstaller-сборка
-включала только базовые модули `pyannote.audio`.
-
-Изменено:
-
-- `GigaScribe.spec`: явно собраны модули сегментации и их базовые блоки
-  (`pyannote.audio.models.segmentation`, `pyannote.audio.models.blocks`).
-- `windows/build-windows.ps1`: проверка импорта архитектуры VAD ещё до
-  тяжёлой PyInstaller-сборки; после сборки печатаются суммарный несжатый
-  размер portable и 20 самых больших файлов с размером каждого.
-- `desktop.py --self-check`: проверяет, что **собранный EXE** может импортировать
-  `PyanNet` и `SincNet`, а не только корневой пакет `pyannote.audio`.
-- Обновлены тестовые подмены и регрессионная проверка сборочных файлов.
-
-Это устраняет известный пропущенный модуль при упаковке. Но **не гарантирует**
-успешную загрузку реальных VAD-весов/декодирование на конкретном Windows ПК:
-на Linux не проверена сборка EXE и нет доступа к весам `pyannote/segmentation-3.0`
-без токена. Для начала повторите распознавание с уже установленной VAD;
-если следующая ошибка иная, приложите её полный текст.
-
-### Почему portable большой и как уменьшить
-
-В полном CUDA-дистрибутиве PyTorch, CUDA/cuDNN и их DLL занимают значительно
-больше места, чем оболочка и интерфейс. 3 ГБ распакованного portable возможны
-даже без скачанных весов GigaAM. В этой версии не удаляются вычислительные
-библиотеки (это могло бы сломать RTX 5060 и VAD).
-
-Чтобы понять конкретный состав, смотрите конец шага `Build Windows installer
-and portable distribution` в GitHub Actions: `Portable uncompressed size`
-и `Largest bundled files`. Затем можно отдельно оптимизировать сборку по
-измерениям: например, создать CPU-only lite-дистрибутив (без CUDA) или
-перевести отдельные модели на ONNX Runtime. Это отдельная задача,
-которая требует повторных тестов распознавания.
-
-
-## 1.3.4 — startup / portable / taskbar / bundle cleanup
-
-- GitHub Actions now uploads the **portable directory directly**, not a pre-packed
-  ZIP. GitHub produces the only ZIP that users download. The `.portable` hidden
-  marker is explicitly included (`include-hidden-files: true`) so portable model
-  storage continues to work correctly.
-- Removed the second, duplicate FFmpeg (`tools/ffmpeg.exe`). The existing
-  `imageio_ffmpeg` binary remains; audio conversion uses its absolute path.
-- CUDA detection is initiated asynchronously on the first health request;
-  PyTorch no longer blocks the first server health response. NumPy is imported
-  on demand for audio operations. Actual startup-time improvement depends on
-  disk speed/antivirus/Windows machine; this is not a benchmark claim.
-- Borderless window maximize uses the current monitor's **work area** (excluding
-  Windows taskbar) rather than treating maximize as fullscreen. Handles a
-  taskbar on a secondary monitor. Windows runtime still needs real-world QA.
-- Left CUDA and cuDNN files intact; do NOT delete them manually. Some
-  similarly named DLLs are functional alternatives, not confirmed duplicates.
-- Standard silence-aware segmentation remains the default because it produced
-  better results in your tests. VAD remains optional.
+- Локально выполнены тесты Python/API, включая регрессионные проверки путей моделей; также проверены кодировки и синтаксис TSX.
+- Windows-сборка через PyInstaller, Inno Setup, реальный старт EXE, реальная расшифровка всеми четырьмя моделями и итоговый размер **не подтверждены в Linux-среде**. В Actions проверяются Python-тесты, наличие VAD-модулей, упаковка и `GigaScribe.exe --self-check` без моделей.
+- Если Actions упадёт, полный лог шага важнее статуса всей сборки.

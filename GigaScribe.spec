@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller onedir, CUDA-enabled Windows build with Mantine frontend."""
+"""PyInstaller onedir, CPU-only Windows build with Mantine frontend."""
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 

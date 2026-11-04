@@ -122,7 +122,7 @@ def test_model_download_and_delete_isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(model_store, '_downloads', {})
     # Avoid network; simulated files still pass the same verified download flow.
     def fake_fetch(choice, destination, progress):
-        content = ('checkpoint-' + choice + destination.suffix).encode()
+        content = ('checkpoint-' + choice + destination.suffix).encode() * 200
         destination.write_bytes(content)
         progress(len(content), len(content))
     monkeypatch.setattr(model_store, '_fetch_file', fake_fetch)
@@ -295,7 +295,7 @@ def test_desktop_self_check_without_models(monkeypatch, tmp_path):
     (frontend / 'assets').mkdir(parents=True)
     (frontend / 'index.html').write_text('<div>GigaScribe</div>', encoding='utf-8')
     monkeypatch.setattr(backend_main, 'DIST', frontend)
-    monkeypatch.setattr(torch.version, 'cuda', '12.8')
+    monkeypatch.setattr(torch.version, 'cuda', None)
     monkeypatch.setitem(sys.modules, 'gigaam', types.SimpleNamespace(load_model=lambda: None))
     # Simulate the dynamically imported pyannote checkpoint architecture.
     # This is the exact import that was absent from the v1.3.2 frozen EXE.
@@ -334,17 +334,14 @@ def test_desktop_self_check_without_models(monkeypatch, tmp_path):
     assert 'OK:' in (tmp_path / 'gigascribe-desktop-self-check.log').read_text(encoding='utf-8')
 
 
-def test_select_device_and_missing_cuda(monkeypatch):
+def test_cpu_only_and_cuda_is_rejected():
     from backend import transcription
-    monkeypatch.setattr(transcription, 'device_info', lambda: {'cuda_available': False, 'reason':'CPU-only'})
     assert transcription.resolve_device('cpu') == 'cpu'
     assert transcription.resolve_device('auto') == 'cpu'
     import pytest
-    with pytest.raises(RuntimeError, match='GPU NVIDIA недоступна'):
+    with pytest.raises(RuntimeError, match='только на CPU'):
         transcription.resolve_device('cuda')
-    monkeypatch.setattr(transcription, 'device_info', lambda: {'cuda_available': True})
-    assert transcription.resolve_device('auto') == 'cuda'
-    assert transcription.resolve_device('cuda') == 'cuda'
+    assert transcription.device_info()['cuda_available'] is False
 
 
 def test_vad_requires_independent_download(monkeypatch, tmp_path):

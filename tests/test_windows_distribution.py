@@ -24,13 +24,14 @@ def test_inno_setup_script_has_explicit_utf8_bom():
     assert (ROOT / "windows" / "GigaScribe.iss").read_bytes().startswith(b"\xef\xbb\xbf")
 
 
-def test_separate_artifacts_and_gpu_build():
+def test_separate_artifacts_and_cpu_build():
     workflow=(ROOT / '.github/workflows/build-windows.yml').read_text(encoding="utf-8")
     script=(ROOT / 'windows/build-windows.ps1').read_text(encoding="utf-8")
     assert 'GigaScribe-Windows-Installer' in workflow
     assert 'GigaScribe-Windows-Portable' in workflow
     assert 'frontend' in workflow and 'npm run build' in workflow
-    assert 'cu128' in script and 'torch==2.10.0' in script
+    assert '/whl/cpu' in script and 'torch==2.10.0' in script
+    assert '/whl/cu128' not in script
     assert 'gigaam[longform]' in script
 
 
@@ -72,38 +73,25 @@ def test_no_nested_portable_zip_and_marker_uploaded():
     assert 'path: releases/GigaScribe-Setup-Windows-x64.exe' in workflow
 
 
-def test_ffmpeg_not_duplicated_and_cuda_runtime_retained():
+def test_ffmpeg_not_duplicated_and_cpu_runtime():
     spec = (ROOT/'GigaScribe.spec').read_text(encoding='utf-8')
     build = (ROOT/'windows/build-windows.ps1').read_text(encoding='utf-8')
     assert "windows' / 'vendor' / 'ffmpeg.exe'" not in spec
     assert 'binaries=[]' in spec
     assert 'shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe()' not in build
-    assert 'cu128' in build  # Keep GPU support.
+    assert '/whl/cpu' in build  # CPU-only build.
     assert '--self-check' in build
 
 
-def test_health_does_not_block_on_gpu_probe(monkeypatch):
+def test_health_requires_no_torch_import_on_startup(monkeypatch):
     from backend import main
     from fastapi.testclient import TestClient
-    import threading
-    started = threading.Event()
-    release = threading.Event()
-
-    def slow_probe():
-        started.set()
-        release.wait(3)
-        return {'cuda_available': True}
-
-    monkeypatch.setattr(main, 'device_info', slow_probe)
-    monkeypatch.setattr(main, '_device_probe_started', False)
-    monkeypatch.setattr(main, '_device_probe_result', None)
-    try:
-        r = TestClient(main.app).get('/api/health')
-        assert r.status_code == 200
-        assert started.wait(1)
-        assert r.json()['device'] is None  # No waiting for heavy torch import.
-    finally:
-        release.set()
+    import sys
+    original = sys.modules.get('torch')
+    assert TestClient(main.app).get('/api/health').status_code == 200
+    health = TestClient(main.app).get('/api/health').json()
+    assert health['device']['cuda_available'] is False
+    assert sys.modules.get('torch') is original
 
 
 def test_frameless_window_uses_current_monitor_work_area():
@@ -140,3 +128,20 @@ def test_frameless_window_uses_current_monitor_work_area():
     assert win.positions[0][:4] == (1920, 0, 1920, 1032)
     assert toggle_work_area(123, restore, user32=win) is None
     assert win.positions[1][:4] == (2100, 150, 1000, 700)
+
+
+def test_frontend_offers_four_models_and_cpu_only():
+    source = (ROOT / 'frontend/src/App.tsx').read_text(encoding='utf-8')
+    for key in ("'russian'", "'russian_ctc'", "'multilingual'", "'multilingual_large'"):
+        assert key in source
+    assert "const device: Device = 'cpu'" in source
+    assert 'setDevice(' not in source
+    assert 'Проверяем модели' in source  # Avoid false 'not installed' while loading.
+    assert 'serviceError' in source
+
+
+def test_clean_build_env_prevents_reusing_old_cuda_wheels():
+    script = (ROOT / 'windows/build-windows.ps1').read_text(encoding='ascii')
+    assert "Remove-Item -Recurse -Force '.venv-build'" in script
+    assert "torch.version.cuda is None" in script
+    assert script.index("Remove-Item -Recurse -Force '.venv-build'") < script.index("'venv', '.venv-build'")

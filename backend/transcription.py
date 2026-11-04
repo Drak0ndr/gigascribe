@@ -14,7 +14,9 @@ from typing import Callable
 
 MODELS = {
     "russian": "v3_e2e_rnnt",
+    "russian_ctc": "v3_e2e_ctc",
     "multilingual": "multilingual_ctc",
+    "multilingual_large": "multilingual_large_ctc",
 }
 SAMPLE_RATE = 16_000
 MAX_SEGMENT_SECONDS = 23.0  # GigaAM .transcribe() supports <= 25 seconds.
@@ -56,34 +58,22 @@ def _use_normalized_wav_loader(model) -> None:
 
 
 def device_info() -> dict:
-    """Do not silently claim GPU support in a CPU-only torch distribution."""
-    try:
-        import torch
-        cuda = bool(torch.cuda.is_available())
-        return {
-            "cuda_available": cuda,
-            "gpu_name": torch.cuda.get_device_name(0) if cuda else None,
-            "torch_version": torch.__version__,
-            "cuda_runtime": torch.version.cuda,
-            "reason": None if cuda else (
-                "Установлена CPU-сборка PyTorch" if torch.version.cuda is None else
-                "CUDA недоступна: проверьте драйвер NVIDIA и совместимость видеокарты"
-            ),
-        }
-    except Exception as exc:
-        return {"cuda_available": False, "gpu_name": None, "torch_version": None,
-                "cuda_runtime": None, "reason": str(exc)}
+    """Report the CPU-only distribution without importing PyTorch on startup."""
+    return {
+        "cuda_available": False,
+        "gpu_name": None,
+        "torch_version": None,
+        "cuda_runtime": None,
+        "reason": "GigaScribe Lite использует CPU-only PyTorch",
+    }
 
 
 def resolve_device(preference: str) -> str:
     if preference not in ("auto", "cpu", "cuda"):
         raise ValueError("Неизвестное устройство вычислений")
-    if preference == "cpu":
-        return "cpu"
-    info = device_info()
-    if preference == "cuda" and not info["cuda_available"]:
-        raise RuntimeError("GPU NVIDIA недоступна: " + (info["reason"] or "CUDA не обнаружена"))
-    return "cuda" if info["cuda_available"] else "cpu"
+    if preference == "cuda":
+        raise RuntimeError("Данная сборка GigaScribe работает только на CPU")
+    return "cpu"
 
 
 def load_model(choice: str, device: str = "auto"):

@@ -6,13 +6,25 @@ import shutil
 import threading
 from pathlib import Path
 
-from backend.model_store import storage_root
+from backend.model_store import storage_root, storage_roots
 
 LOCK = threading.RLock()
 _state = {'status': 'not_installed', 'progress': 0, 'detail': '', 'error': None}
 
 
 def base_dir() -> Path:
+    for root in storage_roots():
+        candidate = root / 'vad'
+        marker = candidate / '.ready.json'
+        if marker.is_file():
+            try:
+                files = json.loads(marker.read_text(encoding='utf-8'))
+                if files and all((candidate / 'weights' / name).is_file()
+                                 and (candidate / 'weights' / name).stat().st_size == size
+                                 for name, size in files.items()):
+                    return candidate
+            except (OSError, ValueError, TypeError):
+                pass
     return storage_root() / 'vad'
 
 

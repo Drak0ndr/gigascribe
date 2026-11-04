@@ -22,6 +22,8 @@ CDN = 'https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM'
 CHECKPOINT_MD5 = {
     'russian': '2730de7545ac43ad256485a462b0a27a',
     'multilingual': '5379d887c53ccd9cb95981e2a1832720',
+    'russian_ctc': '367074d6498f426d960b25f49531cf68',
+    'multilingual_large': '79a9adde50dd7f35bbf70927cb6557d0',
 }
 STATE_LOCK = threading.RLock()
 _downloads: dict[str, dict] = {}
@@ -49,9 +51,66 @@ def storage_root() -> Path:
     return Path(__file__).resolve().parent.parent / 'models'
 
 
+def storage_roots() -> tuple[Path, ...]:
+    """First root is the desired download location; later roots contain old data.
+
+    A portable build used to hide previously installed models by unconditionally
+    switching the root. We locate existing checkpoints without copying gigabytes.
+    An explicit override intentionally disables fallback (including in tests).
+    """
+    primary = storage_root()
+    if os.environ.get('GIGASCRIBE_MODELS_DIR'):
+        return (primary,)
+    candidates = [primary]
+    if sys.platform == 'win32':
+        local = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local') / 'GigaScribe' / 'models'
+        candidates.append(local)
+        if getattr(sys, 'frozen', False):
+            candidates.append(Path(sys.executable).resolve().parent / 'models')
+    # Older upstream GigaAM downloads are flat files in its default cache.
+    candidates.append(Path.home() / '.cache' / 'gigaam')
+    return tuple(dict.fromkeys(candidates))
+
+
+def _paths_at(root: Path, choice: str) -> tuple[Path, ...]:
+    name = MODELS[choice]
+    base = root / name
+    # GigaScribe stores a separate folder per model. The upstream cache is flat.
+    if root.name == 'gigaam' and root.parent.name == '.cache':
+        base = root
+    names = [name + '.ckpt']
+    if 'e2e' in name:
+        names.append(name + '_tokenizer.model')
+    return tuple(base / filename for filename in names)
+
+
+def _is_complete(root: Path, choice: str) -> bool:
+    """Fast path using our ready marker; accept old complete GigaAM files too.
+
+    Legacy checkpoints without a marker are verified by GigaAM's official MD5
+    check when loaded. Never accept temporary *.part downloads as complete.
+    """
+    files = _paths_at(root, choice)
+    if any(p.with_name(p.name + '.part').exists() for p in files):
+        return False
+    if not all(p.is_file() and p.stat().st_size > 1024 for p in files):
+        return False
+    ready = files[0].parent / '.ready.json'
+    if not ready.exists():
+        return True  # Legacy models saved before .ready.json was introduced.
+    try:
+        expected = json.loads(ready.read_text(encoding='utf-8'))
+        return all(p.stat().st_size == expected[p.name] for p in files)
+    except (ValueError, OSError, KeyError, TypeError):
+        return False
+
+
 def folder(choice: str) -> Path:
     if choice not in MODELS:
         raise ValueError('Неизвестная модель')
+    for root in storage_roots():
+        if _is_complete(root, choice):
+            return _paths_at(root, choice)[0].parent
     return storage_root() / MODELS[choice]
 
 
@@ -59,29 +118,18 @@ def files_for(choice: str) -> tuple[Path, ...]:
     name = MODELS[choice]
     base = folder(choice)
     names = [name + '.ckpt']
-    if choice == 'russian':
+    if 'e2e' in name:
         names.append(name + '_tokenizer.model')
     return tuple(base / filename for filename in names)
 
 
 def installed(choice: str) -> bool:
-    """A successful verified download is required; reject partial or changed files."""
-    files = files_for(choice)
-    ready = folder(choice) / '.ready.json'
-    if not ready.is_file():
-        return False
-    try:
-        expected = json.loads(ready.read_text(encoding='utf-8'))
-        return all(p.is_file() and p.stat().st_size == expected[p.name] and
-                   p.stat().st_size > 0 for p in files)
-    except (ValueError, OSError, KeyError, TypeError):
-        return False
+    return any(_is_complete(root, choice) for root in storage_roots())
 
 
-def _used_bytes(base: Path) -> int:
-    if not base.is_dir():
-        return 0
-    return sum(p.stat().st_size for p in base.iterdir() if p.is_file() and not p.is_symlink())
+def _used_bytes(choice: str) -> int:
+    # Count only selected model files, not the whole legacy shared GigaAM cache.
+    return sum(p.stat().st_size for p in files_for(choice) if p.is_file() and not p.is_symlink())
 
 
 def list_models() -> dict:
@@ -97,7 +145,8 @@ def list_models() -> dict:
                 'name': name,
                 'status': status,
                 'installed': has_files,
-                'size_bytes': _used_bytes(folder(choice)),
+                'size_bytes': _used_bytes(choice),
+                'path': str(folder(choice)),
                 'progress': current.get('progress', 0) if status == 'downloading' else 100 if has_files else 0,
                 'detail': current.get('detail', '') if status in ('downloading', 'failed') else '',
                 'error': current.get('error') if status == 'failed' else None,

@@ -148,7 +148,7 @@ def self_check() -> int:
             _use_normalized_wav_loader,
         )
         assert callable(gigaam.load_model), 'GigaAM entry point missing'
-        assert torch.version.cuda, 'CPU-only PyTorch build accidentally bundled'
+        assert torch.version.cuda is None, 'Unexpected CUDA PyTorch: expected CPU-only distribution'
         assert callable(vad_store.installed), 'VAD manager import failed'
         assert (DIST / 'index.html').is_file(), 'Bundled frontend is missing'
         assert (DIST / 'assets').is_dir(), 'Mantine asset files missing'

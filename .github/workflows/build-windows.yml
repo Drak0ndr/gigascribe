@@ -20,6 +20,11 @@ jobs:
         with:
           python-version: '3.11'
           architecture: x64
+      - name: Check Python syntax before installing heavy dependencies
+        shell: pwsh
+        run: |
+          python -m compileall -q backend desktop.py tests
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed' }
       - name: Build React + Mantine frontend
         shell: pwsh
         run: |

@@ -12,14 +12,16 @@ function Run {
     if ($LASTEXITCODE -ne 0) { throw "Failed (${LASTEXITCODE}): $Command $($ArgsList -join ' ')" }
 }
 if (-not (Test-Path 'frontend\dist\index.html')) { throw 'Missing Mantine frontend; run npm run build inside frontend first.' }
+# Always recreate the venv: old CUDA packages must never leak into Lite builds.
+if (Test-Path '.venv-build') { Remove-Item -Recurse -Force '.venv-build' }
 $pythonVersion = (& python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))').Trim()
 if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.11') { throw 'Python 3.11 is required' }
 Run -Command 'python' -ArgsList @('-m', 'venv', '.venv-build')
 $python = Join-Path $root '.venv-build\Scripts\python.exe'
 Run -Command $python -ArgsList @('-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel')
-# RTX 50xx (Blackwell) requires a CUDA build; CPU-only wheels were a v1.2 mistake.
-# 2.10/torchcodec 0.10 satisfy upstream GigaAM's longform extra.
-Run -Command $python -ArgsList @('-m', 'pip', 'install', 'torch==2.10.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cu128')
+# CPU-only wheels dramatically reduce the download and PyInstaller bundle size.
+# Explicitly use the CPU index; do not allow pip to select a CUDA wheel.
+Run -Command $python -ArgsList @('-m', 'pip', 'install', 'torch==2.10.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cpu')
 Run -Command $python -ArgsList @('-m', 'pip', 'install', '-r', 'requirements-desktop.txt', 'pyinstaller', 'pytest', 'httpx', 'gigaam[longform] @ git+https://github.com/salute-developers/GigaAM.git')
 Run -Command $python -ArgsList @('-m', 'pip', 'check')
 # Fail *before* the expensive PyInstaller build if the expected checkpoint
@@ -28,7 +30,7 @@ Run -Command $python -ArgsList @('-c', 'from pyannote.audio.models.segmentation.
 Run -Command $python -ArgsList @('-m', 'pytest', 'tests', '-q')
 # Use imageio-ffmpeg's own bundled executable. No second 100-MiB copy.
 Run -Command $python -ArgsList @('-m', 'pip', 'cache', 'purge')
-Run -Command $python -ArgsList @('-c', 'import torch; assert torch.version.cuda, "CUDA wheel missing"; print("CUDA runtime:", torch.version.cuda)')
+Run -Command $python -ArgsList @('-c', 'import torch; assert torch.version.cuda is None, "CUDA wheel accidentally installed"; print("CPU-only PyTorch:", torch.__version__)')
 Run -Command $python -ArgsList @('-m', 'PyInstaller', '--noconfirm', '--clean', 'GigaScribe.spec')
 $exe = Join-Path $root 'dist\GigaScribe\GigaScribe.exe'
 if (-not (Test-Path $exe)) { throw 'PyInstaller did not create GigaScribe.exe' }
