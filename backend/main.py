@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.transcription import MODELS, transcribe_audio, unload_model, ffmpeg_executable, device_info
-from backend import model_store, vad_store
+from backend import model_store, vad_store, model_inventory
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "frontend" / "dist"
@@ -26,7 +26,7 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.3.5")
+app = FastAPI(title="GigaScribe", version="1.3.6")
 app.state.desktop_token = None
 
 
@@ -84,9 +84,8 @@ def health() -> dict:
 
 @app.get("/api/models")
 def models_status() -> dict:
-    current = model_store.list_models()
-    current['vad'] = vad_store.status()
-    return current
+    # Return an in-memory snapshot immediately; never scan disks in this route.
+    return model_inventory.get_status()
 
 
 class VadRequest(BaseModel):

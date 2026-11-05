@@ -9,6 +9,7 @@ import secrets
 import os
 import re
 import socket
+import logging
 import threading
 import time
 from urllib.error import URLError
@@ -72,11 +73,30 @@ class WindowAPI:
         return True
 
 
+def _configure_logging():
+    """Never make logging a prerequisite for opening the desktop window."""
+    try:
+        from logging.handlers import RotatingFileHandler
+        from pathlib import Path
+        base = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local')
+        folder = base / 'GigaScribe' / 'logs'
+        folder.mkdir(parents=True, exist_ok=True)
+        log_path = folder / 'startup.log'
+        handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=2, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+        logging.getLogger().addHandler(handler)
+        logging.getLogger().setLevel(logging.INFO)
+        return log_path
+    except Exception:
+        return None
+
+
 def main() -> None:
     import webview
     from backend.main import app
     from pathlib import Path
     import sys
+    logging.info('Desktop launch: Python %s, packaged=%s', sys.version.split()[0], bool(getattr(sys, 'frozen', False)))
     # FFmpeg is shipped once by imageio_ffmpeg and accessed using its
     # absolute path in the audio conversion layer. Do not add a second copy.
     webview.settings['ALLOW_DOWNLOADS'] = True
@@ -104,6 +124,7 @@ def main() -> None:
         else:
             raise RuntimeError('Локальный сервер GigaScribe не запустился')
 
+        logging.info('Local HTTP service ready')
         url = f'http://127.0.0.1:{port}/?token={app.state.desktop_token}'
         bridge = WindowAPI()
         bridge.window = webview.create_window('GigaScribe', url, js_api=bridge,
@@ -111,7 +132,9 @@ def main() -> None:
                               frameless=True, easy_drag=True, shadow=True,
                               background_color='#15171c')
         # Windows WebView2 is available by default on modern Windows 10/11.
+        logging.info('Desktop window created; entering WebView event loop')
         webview.start(debug=False)
+        logging.info('Desktop window closed')
     finally:
         server.should_exit = True
         thread.join(timeout=3)
@@ -182,4 +205,19 @@ if __name__ == '__main__':
     import sys
     if '--self-check' in sys.argv:
         sys.exit(self_check())
-    main()
+    log = _configure_logging()
+    try:
+        main()
+    except Exception:
+        logging.exception('Desktop startup failed')
+        # In a windowed PyInstaller build stdout/stderr are invisible.
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    'GigaScribe could not start. Diagnostic log:\n' + str(log or '(unavailable)'),
+                    'GigaScribe - startup error', 0x10)
+            except Exception:
+                pass
+        raise

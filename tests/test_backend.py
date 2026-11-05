@@ -101,8 +101,18 @@ def test_models_not_automatically_downloaded(monkeypatch, tmp_path):
     from backend import model_store
     monkeypatch.setenv('GIGASCRIBE_MODELS_DIR', str(tmp_path / 'models'))
     monkeypatch.setattr(model_store, '_downloads', {})
+    from backend import model_inventory
+    import time
+    model_inventory.reset_for_tests()
     response = client.get('/api/models')
     assert response.status_code == 200
+    # Scanning is deliberately asynchronous. Poll the endpoint, not the filesystem.
+    for _ in range(100):
+        if not response.json()['checking']:
+            break
+        time.sleep(.02)
+        response = client.get('/api/models')
+    assert not response.json()['checking']
     assert response.json()['models']['russian']['status'] == 'not_installed'
     assert response.json()['models']['multilingual']['status'] == 'not_installed'
     assert not (tmp_path / 'models').exists()
