@@ -51,6 +51,18 @@ if ($LASTEXITCODE -ne 0) {
     if (Test-Path $log) { Get-Content $log }
     throw 'Packaged EXE self-check failed'
 }
+# Exercise the actual packed EXE's HTTP backend, model inventory and shutdown.
+$env:GIGASCRIBE_LOG_DIR = Join-Path $root 'build-logs'
+New-Item -ItemType Directory -Path $env:GIGASCRIBE_LOG_DIR -Force | Out-Null
+& $exe --backend-smoke
+if ($LASTEXITCODE -ne 0) {
+    Get-ChildItem -LiteralPath $env:GIGASCRIBE_LOG_DIR -Filter '*.log' | ForEach-Object {
+        Write-Host ('=== ' + $_.Name + ' ===')
+        Get-Content -LiteralPath $_.FullName -Tail 100
+    }
+    throw 'Packaged EXE backend smoke failed'
+}
+Remove-Item Env:GIGASCRIBE_LOG_DIR
 $portable = Join-Path $root 'portable\GigaScribe'
 if (Test-Path $portable) { Remove-Item -Recurse -Force $portable }
 New-Item -ItemType Directory -Path $portable -Force | Out-Null

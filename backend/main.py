@@ -15,7 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Dep
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.transcription import MODELS, transcribe_audio, unload_model, ffmpeg_executable, device_info
+from backend.transcription import MODELS, transcribe_audio, unload_model, device_info
 from backend import model_store, vad_store, model_inventory
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,7 +26,7 @@ ALLOWED_EXTENSIONS = {
     ".webm", ".aac", ".wma", ".mov", ".mkv",
 }
 
-app = FastAPI(title="GigaScribe", version="1.3.6")
+app = FastAPI(title="GigaScribe", version="1.3.7")
 app.state.desktop_token = None
 
 
@@ -74,10 +74,11 @@ def _process(job_id: str, path: Path, temp_dir: str, model: str, mode: str, devi
 def health() -> dict:
     return {
         "status": "ok",
-        "ffmpeg": ffmpeg_executable() is not None,
+        "ffmpeg": None,  # Checked only when audio is processed; no disk IO during startup.
         "models": MODELS,
         "device": device_info(),
         "max_file_mb": MAX_FILE_BYTES // 1024 // 1024,
+        "log_dir": os.environ.get("GIGASCRIBE_LOG_DIR", ""),
     }
 
 

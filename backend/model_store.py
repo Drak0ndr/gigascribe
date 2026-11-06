@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import sys
@@ -137,7 +138,9 @@ def list_models() -> dict:
         models = {}
         for choice, name in MODELS.items():
             current = dict(_downloads.get(choice) or {})
+            logging.getLogger(__name__).info('Inspecting checkpoint files for %s', choice)
             has_files = installed(choice)
+            logging.getLogger(__name__).info('Finished inspecting %s (installed=%s)', choice, has_files)
             status = ('downloading' if current.get('status') == 'downloading' else
                       'installed' if has_files else
                       'failed' if current.get('status') == 'failed' else 'not_installed')

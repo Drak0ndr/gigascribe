@@ -42,7 +42,8 @@ def test_frontend_native_export_and_mantine_sources():
     assert '@mantine/core' in pkg
     assert 'pywebview.api.save_text' in source
     assert 'webview.SAVE_DIALOG' in desktop
-    assert 'frameless=True' in desktop
+    assert 'frameless=not native_frame' in desktop
+    assert "main(native_frame='--custom-frame' not in sys.argv)" in desktop
 
 
 def test_vad_checkpoint_architecture_is_bundled_and_checked():

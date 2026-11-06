@@ -47,11 +47,28 @@ def installed() -> bool:
 def status() -> dict:
     with LOCK:
         state = dict(_state)
-    has = installed()
-    status_name = state['status'] if state['status'] in ('downloading', 'failed') else ('installed' if has else 'not_installed')
+    # The old status endpoint recursively traversed the entire Hugging Face
+    # snapshot (.cache included) on every inventory refresh. On Windows this
+    # can hold the filesystem scan for a long time. We only need the files
+    # listed in the ready manifest, which we wrote during the download.
+    directory = base_dir()
+    ready = directory / '.ready.json'
+    has = False
     size = 0
-    if weights_dir().exists():
-        size = sum(p.stat().st_size for p in weights_dir().rglob('*') if p.is_file() and not p.is_symlink())
+    try:
+        if ready.is_file():
+            expected = json.loads(ready.read_text(encoding='utf-8'))
+            if isinstance(expected, dict) and expected:
+                weights = directory / 'weights'
+                entries = [(weights / name, expected_size) for name, expected_size in expected.items()]
+                has = all(isinstance(expected_size, int) and expected_size > 0 and
+                          path.is_file() and path.stat().st_size == expected_size
+                          for path, expected_size in entries)
+                if has:
+                    size = sum(expected.values())
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    status_name = state['status'] if state['status'] in ('downloading', 'failed') else ('installed' if has else 'not_installed')
     return {'name': 'pyannote/segmentation-3.0', 'status': status_name, 'installed': has,
             'size_bytes': size, 'progress': state['progress'] if status_name == 'downloading' else (100 if has else 0),
             'detail': state['detail'], 'error': state['error'] if status_name == 'failed' else None}

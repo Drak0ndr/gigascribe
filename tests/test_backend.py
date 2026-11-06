@@ -204,8 +204,9 @@ def test_desktop_launcher_local_window(monkeypatch):
     main()
     assert observed['title'].startswith('GigaScribe')
     assert '127.0.0.1' in observed['url']
-    assert app.state.desktop_token
-    app.state.desktop_token = None
+    assert app.state.desktop_token is None  # The auth token lives in the isolated child.
+    assert observed['options']['frameless'] is False  # Native Win32 frame during recovery.
+    assert 'chrome=native' in observed['url']
 
 
 def test_normalized_pcm_loader_avoids_external_ffmpeg(tmp_path):

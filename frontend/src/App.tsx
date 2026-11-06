@@ -26,7 +26,9 @@ declare global {
     pywebview?: {api?: { minimize:()=>Promise<void>,toggle_maximize:()=>Promise<void>,close:()=>Promise<void>,save_text:(name:string,body:string)=>Promise<boolean> }}
   }
 }
-const token = new URLSearchParams(location.search).get('token')
+const query = new URLSearchParams(location.search)
+const token = query.get('token')
+const useCustomFrame = query.get('chrome') === 'custom'
 const auth = (): Record<string, string> => token ? {'X-GigaScribe-Token': token} : {}
 const fmtSize = (n:number) => n > 1e9 ? `${(n/1024**3).toFixed(2)} ГБ` : `${(n/1024**2).toFixed(0)} МБ`
 const fmtTime = (n:number) => `${Math.floor(n/3600)?`${Math.floor(n/3600)}:`:''}${Math.floor(n%3600/60).toString().padStart(2,'0')}:${Math.floor(n%60).toString().padStart(2,'0')}`
@@ -46,6 +48,7 @@ function App() {
   const [models,setModels] = useState<ModelInfo|null>(null)
   const [serviceError,setServiceError] = useState<string|null>(null)
   const [deviceInfo,setDeviceInfo] = useState<DeviceInfo|null>(null)
+  const [logDirectory,setLogDirectory] = useState<string|null>(null)
   const [job,setJob] = useState<Job|null>(null)
   const [resultText,setResultText] = useState('')
   const [vadToken,setVadToken] = useState('')
@@ -70,7 +73,7 @@ function App() {
       const timeout=setTimeout(()=>controller.abort(),5000)
       try{
         const response=await fetch('/api/health',{cache:'no-store',signal:controller.signal})
-        if(response.ok){const h=await response.json();if(active)setDeviceInfo(h.device)}
+        if(response.ok){const h=await response.json();if(active){setDeviceInfo(h.device);setLogDirectory(h.log_dir??null)}}
       }catch{/* Inventory has its own error display. */}
       finally{clearTimeout(timeout)}
     }
@@ -178,8 +181,8 @@ function App() {
   const nav=[{key:'transcribe',label:'Расшифровка',icon:IconMicrophone},{key:'models',label:'Модели',icon:IconFolder},{key:'settings',label:'Настройки',icon:IconSettings}] as const
 
   return <div className="app-root">
-    {isDesktop&&<div className="windowbar">
-      <div className="windowbrand pywebview-drag-region"><IconMicrophone size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3.6 Lite</span></div>
+    {isDesktop&&useCustomFrame&&<div className="windowbar">
+      <div className="windowbrand pywebview-drag-region"><IconMicrophone size={18} stroke={2}/><span>GigaScribe</span><span className="windowver">1.3.7 Lite</span></div>
       <div className="windowactions">
         <button aria-label="Свернуть" onClick={()=>void window.pywebview?.api?.minimize()}><IconMinus size={16}/></button>
         <button aria-label="Развернуть" onClick={()=>void window.pywebview?.api?.toggle_maximize()}><IconSquare size={13}/></button>
@@ -263,8 +266,9 @@ function App() {
           <header className="page-header"><Text c="dimmed" size="sm" mb={3}>СИСТЕМА</Text><Title order={2}>Настройки и диагностика</Title><Text c="dimmed" size="sm" mt={6}>Выбранное устройство видно при расшифровке.</Text></header>
           <Card className="panel" withBorder radius="lg" padding="lg"><Group gap="sm" mb="lg"><IconCpu size={22}/><Text fw={600}>Режим вычислений</Text></Group><Stack gap="sm"><Group justify="space-between"><Text size="sm" c="dimmed">CUDA</Text><Badge variant="light" color="blue">Отключена · CPU-only</Badge></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Устройство</Text><Text size="sm">CPU</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">Версия PyTorch</Text><Text size="sm">{deviceInfo?.torch_version||'CPU-версия (определяется при распознавании)'}</Text></Group><Divider/><Group justify="space-between"><Text size="sm" c="dimmed">CUDA runtime</Text><Text size="sm">Не входит в сборку</Text></Group></Stack>{deviceInfo?.reason&&<Text c="dimmed" size="xs" mt="md">{deviceInfo.reason}</Text>}</Card>
           <Card className="panel" withBorder radius="lg" padding="lg"><Text fw={600}>Файлы моделей</Text><Text size="sm" c="dimmed" mt={8} style={{wordBreak:'break-all'}}>{models?.path||'—'}</Text><Text size="xs" c="dimmed" mt="sm">Все веса остаются на диске при обновлении установленной версии приложения.</Text></Card>
+          <Card className="panel" withBorder radius="lg" padding="lg"><Text fw={600}>Журналы запуска</Text><Text size="sm" c="dimmed" mt={8} style={{wordBreak:'break-all'}}>{logDirectory??'Для portable: папка logs рядом с EXE; для установленной версии: %LOCALAPPDATA%/GigaScribe/logs'}</Text><Text size="xs" c="dimmed" mt="sm">startup.log — окно; backend.log — сервер и модели; backend-output.log — ранние ошибки запуска.</Text></Card>
         </Stack>}
-        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3.6 Lite · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
+        <div className="footer"><Text size="xs" c="dimmed">GigaScribe 1.3.7 Lite · Обработка данных локально</Text><Text size="xs" c="dimmed">GigaAM by Sber</Text></div>
       </div></ScrollArea></main>
     </div>
     <Modal centered title="Удалить модель?" opened={pendingDelete!==null} onClose={()=>setPendingDelete(null)}>
