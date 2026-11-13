@@ -23,50 +23,58 @@ from urllib.request import urlopen
 
 
 class WindowAPI:
-    """Small native bridge; never expose arbitrary path writes to web content."""
+    """Expose only callable actions to JavaScript, never native window objects.
+
+    pywebview recursively inspects all PUBLIC attributes of ``js_api``.
+    A public reference to ``webview.Window`` causes it to inspect WinForms
+    ``native``/COM objects, producing accessibility recursion and UI freezes.
+    Store every non-method attribute privately (leading underscore).
+    """
+
+    __slots__ = ('_native_frame', '_window', '_is_maximized', '_restore_bounds')
     def __init__(self, native_frame: bool = True):
-        self.native_frame = native_frame
-        self.window = None
-        self.is_maximized = False
+        self._native_frame = native_frame
+        self._window = None
+        self._is_maximized = False
         self._restore_bounds = None
 
     def minimize(self):
-        if self.window:
-            self.window.minimize()
+        if self._window:
+            self._window.minimize()
 
     def toggle_maximize(self):
-        if not self.window:
+        if not self._window:
             return
         import sys
-        if sys.platform == 'win32' and not self.native_frame:
+        if sys.platform == 'win32' and not self._native_frame:
             # WinForms's maximize() on a frameless form may hide the taskbar.
             # Move this window to its own monitor's work area using native pixels.
             from backend.windows_workarea import toggle_work_area
-            native = self.window.native
+            native = self._window.native
             hwnd = int(native.Handle.ToInt64())
             self._restore_bounds = toggle_work_area(hwnd, self._restore_bounds)
-            self.is_maximized = self._restore_bounds is not None
+            self._is_maximized = self._restore_bounds is not None
         else:
-            if self.is_maximized:
-                self.window.restore()
+            if self._is_maximized:
+                self._window.restore()
             else:
-                self.window.maximize()
-            self.is_maximized = not self.is_maximized
+                self._window.maximize()
+            self._is_maximized = not self._is_maximized
 
     def close(self):
-        if self.window:
-            self.window.destroy()
+        if self._window:
+            self._window.destroy()
 
     def save_text(self, filename: str, body: str) -> bool:
         import webview
-        if self.window is None:
+        if self._window is None:
             return False
         name = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ._ -]', '_', filename)[:100]
         if not name.endswith(('.txt', '.srt')):
             raise ValueError('Сохранение поддерживает только TXT и SRT')
         if len(body) > 30_000_000:
             raise ValueError('Текст слишком большой')
-        selected = self.window.create_file_dialog(
+        selected = self._window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename=name,
             file_types=('Text files (*.txt;*.srt)', 'All files (*.*)'),
         )
@@ -77,6 +85,22 @@ class WindowAPI:
         Path(destination).write_text(body, encoding='utf-8-sig')
         return True
 
+
+
+def verify_js_api_surface() -> None:
+    """Stop packaging if js_api exposes state or a native Window object.
+
+    pywebview recursively walks all public attributes. A public ``window``
+    reference triggers WinForms accessibility recursion and off-UI-thread
+    COM access, which has caused freezes on the user's Windows machine.
+    """
+    bridge = WindowAPI()
+    bridge._window = object()  # stand-in; must NOT be traversed by pywebview
+    exposed = {name: getattr(bridge, name)
+               for name in dir(bridge) if not name.startswith('_')}
+    expected = {'minimize', 'toggle_maximize', 'close', 'save_text'}
+    if set(exposed) != expected or not all(callable(value) for value in exposed.values()):
+        raise RuntimeError(f'Unsafe pywebview bridge attributes: {sorted(exposed)}')
 
 def _log_directory() -> Path:
     """Portable logs live next to EXE; installed logs live in LOCALAPPDATA.
@@ -230,15 +254,15 @@ def main(native_frame: bool = True) -> None:
         webview.settings['ALLOW_DOWNLOADS'] = True
         url = f'http://127.0.0.1:{port}/?token={token}&chrome={"native" if native_frame else "custom"}'
         bridge = WindowAPI(native_frame=native_frame)
-        bridge.window = webview.create_window(
+        bridge._window = webview.create_window(
             'GigaScribe', url, js_api=bridge,
             width=1280, height=840, min_size=(930, 690),
             frameless=not native_frame, easy_drag=not native_frame,
             shadow=True, background_color='#15171c',
         )
-        if hasattr(bridge.window, 'events'):
-            bridge.window.events.shown += lambda: logging.info('Native window shown')
-            bridge.window.events.loaded += lambda: logging.info('WebView frontend loaded')
+        if hasattr(bridge._window, 'events'):
+            bridge._window.events.shown += lambda: logging.info('Native window shown')
+            bridge._window.events.loaded += lambda: logging.info('WebView frontend loaded')
         logging.info('Native window configured, entering GUI event loop')
         webview.start(debug=False)
         logging.info('GUI event loop exited')
@@ -305,6 +329,7 @@ def self_check() -> int:
 
     log = Path(tempfile.gettempdir()) / 'gigascribe-desktop-self-check.log'
     try:
+        verify_js_api_surface()
         import torch
         import gigaam
         import pyannote.audio

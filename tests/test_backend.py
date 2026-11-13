@@ -452,7 +452,7 @@ def test_native_text_save_dialog(tmp_path, monkeypatch):
             assert kwargs['save_filename'] == 'record.txt'
             return (str(target),)
     api = WindowAPI()
-    api.window = FakeWindow()
+    api._window = FakeWindow()
     assert api.save_text('record.txt', 'Привет, React!') is True
     assert target.read_text(encoding='utf-8-sig') == 'Привет, React!'
     assert target.read_bytes().startswith(b'\xef\xbb\xbf')
